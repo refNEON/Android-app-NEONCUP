@@ -1,0 +1,48 @@
+# requirements.lock.txt
+# 本机（Windows / Python 3.13.5）实测可跑通的完整版本锁定。
+# 用途：换机器或重建虚拟环境时拿到一份一模一样、验证过的环境。
+#
+#   python -m pip install -r requirements.lock.txt
+#
+# 只想要最小可用集合，用 requirements.txt（带兼容下界）。
+
+# ---- 数值 / 音频核心 ----
+numpy==2.5.4
+scipy==1.18.1
+soundfile==0.14.0
+soxr==1.1.0
+
+# ---- 可选降噪（会连带拖入 matplotlib 一套，约 60MB）----
+noisereduce==3.0.3
+cloudpickle==3.1.2
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.67.0
+joblib==1.6.0
+kiwisolver==1.5.1
+matplotlib==3.11.2
+pillow==13.0.0
+pyparsing==3.3.3
+tqdm==4.70.1
+colorama==0.4.6
+pycparser==3.11
+cffi==2.1.1
+
+# ---- Web / 任务队列（桌面壳子）----
+Flask==3.0.0
+Werkzeug==3.1.9
+flask-cors==6.0.5
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+itsdangerous==2.2.0
+blinker==1.9.0
+click==8.5.0
+celery==5.3.0
+kombu==5.6.2
+amqp==5.4.1
+billiard==4.3.1
+vine==5.1.0
+redis==8.1.0
+python-dateutil==2.9.0.post0
+typing_extensions==4.16.0
+tzdata==2026.5

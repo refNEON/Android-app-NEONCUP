@@ -1,0 +1,38 @@
+<resources>
+    <string name="app_name">SyncStage</string>
+    <string name="app_subtitle">音游手元 · 音乐对齐与混音</string>
+
+    <string name="section_input">素材</string>
+    <string name="section_mix">混音</string>
+
+    <string name="pick_video">选择手元视频</string>
+    <string name="pick_music">选择外部音乐</string>
+    <string name="not_selected">未选择</string>
+
+    <string name="original_volume">原声音量（手元按键声）</string>
+    <string name="aligned_volume">音乐音量</string>
+
+    <string name="start">开始处理</string>
+    <string name="play">播放结果</string>
+    <string name="share">分享</string>
+
+    <string name="loading_engine">正在启动处理内核…</string>
+    <string name="loading_page">正在加载界面…</string>
+
+    <string name="history">历史处理记录</string>
+    <string name="history_empty">还没有处理完成的历史视频</string>
+    <string name="history_title">历史记录（%1$d 个 · %2$s）</string>
+    <string name="history_hint">点条目可直接播放，右侧删除可释放空间。结果存放在 App 私有目录，卸载会一并清除。</string>
+    <string name="delete">删除</string>
+    <string name="export">导出</string>
+    <string name="export_doing">正在导出到「影片/SyncStage」…</string>
+    <string name="export_done">已导出到「影片/SyncStage」，可在相册或文件管理器里找到</string>
+    <string name="export_failed">导出失败：%1$s</string>
+    <string name="export_denied">没有存储权限，无法导出到影片目录</string>
+    <string name="delete_title">删除这个版本？</string>
+    <string name="delete_message">将删除 %1$s（%2$s），删除后无法恢复。</string>
+    <string name="cancel">取消</string>
+
+    <string name="status_idle">等待开始</string>
+    <string name="tip_no_network">提示：手机端不支持按歌名联网搜歌，请选择本地音乐文件。</string>
+</resources>

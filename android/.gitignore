@@ -1,0 +1,20 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Chaquopy 从 backend/ 同步过来的内核文件（构建时自动生成，不要提交）
+/app/src/main/python/config.py
+/app/src/main/python/pipeline.py
+/app/src/main/python/audio_processor.py
+/app/src/main/python/video_processor.py
+/app/src/main/python/mobile_api.py
+
+# 离线轮子缓存（很大，不进仓库）
+/wheels/

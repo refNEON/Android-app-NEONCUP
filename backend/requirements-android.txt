@@ -1,0 +1,34 @@
+# requirements-android.txt
+# 打包进 Android(Chaquopy) 时的 Python 内核依赖。
+# 刻意不含 Flask / Celery / Redis —— 那三样只是桌面开发壳子。
+#
+# 注意：Chaquopy 17.x 不再从 PyPI 装原生包，而是走自己的仓库
+# (https://chaquo.com/pypi-13.1/)。下面这几个在 Chaquopy 上都有
+# ARM64 预编译轮子，可直接写进 app/build.gradle.kts 的 pip { } 块：
+#
+#   pip {
+#       install("numpy==2.3.4")
+#       install("scipy==1.16.2")
+#       install("soundfile==0.13.1")   // 会自动带上 chaquopy-libsndfile
+#       install("soxr==1.0.0")
+#   }
+#
+# 版本号请以 Chaquopy 仓库中实际存在的为准（见 android/README.md）。
+# 如果某个版本没有对应轮子，去掉版本号让 Chaquopy 自动挑一个即可。
+
+# ---- 数值 / 音频核心（全部有 Android/ARM64 轮子，易打包）----
+numpy>=1.26.0
+scipy>=1.12.0
+soundfile>=0.12.1        # 依赖 libsndfile.so；对齐链路只读 WAV，必需
+
+# ---- 可选 ----
+# soxr：更高质量的重采样器。缺失时 audio_processor._resample 自动退回
+#       scipy.resample_poly，所以可不打包。
+soxr>=0.5.0
+# noisereduce：不要打包。它是可选的，而且会连带拉入 matplotlib
+#       （在 Android 上体积大、无意义）。缺失时 denoise_audio() 透传原音频。
+
+# ---- 重要变更 ----
+# 特征提取(mel/色度/起音/STFT)是纯 numpy + scipy 实现，
+# 不 import librosa，因此彻底摆脱 numba / llvmlite 这两个在
+# Android 上最难打包的原生依赖。设备端只需 numpy/scipy/soundfile。

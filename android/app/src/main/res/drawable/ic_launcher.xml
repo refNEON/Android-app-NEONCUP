@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#7C4DFF"
+        android:pathData="M0,0h108v108h-108z" />
+
+    <!-- 两条波形，象征音轨对齐 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18,44 h68 v6 h-68 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,60 h48 v6 h-48 z" />
+    <path
+        android:fillColor="#03DAC5"
+        android:pathData="M42,76 h24 v6 h-24 z" />
+
+</vector>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 结果视频放在 App 私有目录，通过 FileProvider 分享给其他应用 -->
+    <files-path name="results" path="syncstage/results/" />
+    <cache-path name="cache" path="." />
+    <external-files-path name="external" path="." />
+</paths>
