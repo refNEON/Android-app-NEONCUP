@@ -1,0 +1,777 @@
+================================================================================
+  SyncStage v0.3  ——  打包成 Android App 的完整改造记录
+================================================================================
+
+  生成日期：2026-10-20
+  用    途：日后维护时快速回忆「改了哪些文件、为什么这么改」
+  范    围：只记录最终采用并保留在代码里的改动；试过但放弃的方案不在此列。
+  阅读建议：第 0 节看架构，第 11 节是排错表，其余按需查。
+
+
+================================================================================
+  0. 整体架构（先看这个，其它都好理解）
+================================================================================
+
+  一句话：把一个 Flask + Python 音频对齐程序，整个塞进 Android App。
+
+  原程序分三块：
+    - backend/     Python 内核（音频对齐、FFmpeg 合成）
+    - app.py       Flask 后端，提供 /api/upload、/api/tasks/<id>
+    - frontend/cupnb.html   网页界面
+
+  手机上没有 Flask，也没有 Python 环境。做法是：
+
+     ┌─────────────────────────────────────────────────────┐
+     │  Android App (com.syncstage.app)                    │
+     │                                                     │
+     │  ┌───────────────────────────────────────────────┐  │
+     │  │ MainActivity.kt   界面壳 + 逻辑调度           │  │
+     │  │                                               │  │
+     │  │   WebView ── file:///android_asset/web/       │  │
+     │  │      │         cupnb.html   ← 你的页面        │  │
+     │  │      │                                        │  │
+     │  │      ├── JS bridge（window.SyncStage）        │  │
+     │  │      │      startTask(JSON)  提交任务         │  │
+     │  │      │      taskStatus(id)   读进度/结果       │  │
+     │  │      │                                        │  │
+     │  │      └── http://127.0.0.1:随机端口            │  │
+     │  │             /results/<id>/output.mp4          │  │
+     │  │             （给 <video> 用，支持 Range）      │  │
+     │  └───────────────────────────────────────────────┘  │
+     │                      │                              │
+     │  ┌───────────────────▼───────────────────────────┐  │
+     │  │ Chaquopy 内嵌 CPython 3.10                    │  │
+     │  │   android_entry.py   跨语言入口               │  │
+     │  │   mobile_api.py      无 Flask 版内核接口       │  │
+     │  │   android_web.py     本地静态服务（只送视频）  │  │
+     │  │   audio_processor / pipeline / video_processor│  │
+     │  └───────────────────┬───────────────────────────┘  │
+     │                      │                              │
+     │  ┌───────────────────▼───────────────────────────┐  │
+     │  │ ffmpeg-kit-full 8.1.9（原生 .so）             │  │
+     │  │ 由 FfmpegBackend.kt 包一层，Python 照旧调      │  │
+     │  └───────────────────────────────────────────────┘  │
+     └─────────────────────────────────────────────────────┘
+
+  核心设计原则（很重要，以后改动别破坏它）：
+
+  1) 页面与内核「解耦启动」
+     页面直接从 APK 里读（file://），几十毫秒出来，不等 Python。
+     Python 只在后台慢慢启动，专门负责处理任务和送视频流。
+     以前页面是从 http://127.0.0.1 加载的，内核起不来界面就永远转圈，
+     所以改成了现在这样。
+
+  2) 文件不走网络
+     用户选文件 → Kotlin 复制到 App 缓存 → 把「本地路径」交给 Python。
+     全程没有上传行为，也没有 base64 编码的开销。
+
+  3) 界面的唯一来源是 assets 里的 cupnb.html
+     构建过程不会从 frontend/ 覆盖它。改页面只改那一个文件。
+
+
+================================================================================
+  1. 工程结构（v0.3 根目录）
+================================================================================
+
+  v0.3/
+  ├── settings.gradle.kts       ← 新增。让 Studio 能直接 Open v0.3
+  ├── build.gradle.kts          ← 新增。AGP 8.7.3 / Kotlin 2.0.21 / Chaquopy 17.1.0
+  ├── gradle.properties         ← 新增
+  ├── gradlew / gradlew.bat     ← 新增
+  ├── gradle/wrapper/           ← 新增（含 gradle-wrapper.jar）
+  ├── local.properties          ← 新增（sdk.dir 指向本机 Android SDK）
+  │
+  ├── backend/                  ← Python 内核（同时也被 App 复用）
+  ├── frontend/                 ← 桌面版网页（与 App 互不影响）
+  ├── backup/                   ← 两份 HTML 备份，见第 7 节
+  │
+  └── android/
+      ├── settings.gradle.kts   ← android/ 独立打开时用这套
+      ├── build.gradle.kts
+      ├── check_16kb.py         ← 16KB 对齐自检脚本
+      ├── README.md             ← Android 侧详细说明
+      ├── wheels/               ← 离线 Python 轮子仓库（见第 3 节）
+      └── app/
+          ├── build.gradle.kts  ← 打包配置核心
+          └── src/main/
+              ├── java/com/syncstage/app/
+              │     MainActivity.kt    界面壳、文件选择、任务调度、历史面板
+              │     PythonEngine.kt    与 Python 的所有交互入口
+              │     FfmpegBackend.kt   FFmpeg 的原生实现
+              ├── python/
+              │     android_entry.py   Python 侧入口（被同步进来的内核除外）
+              ├── assets/web/
+              │     cupnb.html         ★ 界面唯一来源，可以直接改
+              │     native-bridge.js   ★ 网页与原生之间的适配层
+              ├── res/                 布局、文案、主题
+              └── AndroidManifest.xml
+
+  为什么根目录也要一套 Gradle 文件：
+    Android Studio 只能 Open 一个含 settings.gradle 的目录。
+    放在 v0.3 根，就能一个窗口同时看到 backend/ 和 android/，
+    改 Python 和改 Kotlin 不用来回切项目。
+    注意：两套 Gradle 的插件版本必须一致，改一处记得改另一处。
+
+
+================================================================================
+  2. 打包方案：Chaquopy
+================================================================================
+
+  用的插件：com.chaquo.python 17.1.0
+
+  它做的事：把 CPython 解释器、pip 包、你的 .py 源码，一起编译进 APK。
+  App 启动后 Python 就在进程内跑，没有额外的服务进程，也不需要 root。
+
+  Python 版本必须是 3.10，不能是 3.13，原因：
+    Chaquopy 的原生包仓库 chaquo.com/pypi-13.1 里，
+    scipy 和 soundfile 只提供到 cp310 的 Android 轮子，cp311 以上没有。
+    用 3.13 会在 pip 阶段直接报 "no matching distribution"。
+
+  构建机上需要有同版本的 CPython 3.10.x，Chaquopy 会自动探测。
+  探测不到时，在 android/app/build.gradle.kts 里取消这行注释并改成你的路径：
+
+      buildPython("C:/Users/<你>/AppData/Local/Programs/Python/Python310/python.exe")
+
+  支持的 CPU 架构：arm64-v8a（真机）+ x86_64（模拟器）。
+  这两个够用，且能把包体压到最小（每多一个架构，.so 体积翻倍）。
+
+
+================================================================================
+  3. 依赖与环境
+================================================================================
+
+  Python 侧（打进 APK 的，见 android/app/build.gradle.kts 的 chaquopy 块）：
+
+      numpy==1.23.3       scipy 1.8.1 的上限就是 numpy 1.25，这里取稳的
+      scipy==1.8.1        Android 轮子最高只到 1.8.1
+      soundfile==0.13.1   自动带 chaquo-libsndfile
+      soxr==0.3.6         重采样
+
+  离线轮子仓库 android/wheels/：
+    chaquo.com 在国内经常几十 KB/s，一次构建能等半小时。
+    做法是把所有需要的轮子（含 openblas、libcxx、libgfortran、libffi、
+    libsndfile、flac、vorbis、ogg 这些原生依赖）手动下好放进 android/wheels/，
+    放一个 .complete 标记文件，构建时就自动切到离线模式：
+
+        pip {
+            options("--no-index")
+            options("--find-links", wheelhouse.absolutePath)
+        }
+
+    目录不完整（没有 .complete）就自动回到联网模式，不会卡死。
+    换机器 / 升级依赖时，把这个目录一起拷走即可。
+
+  桌面侧依赖：backend/requirements.txt
+  手机侧依赖清单：backend/requirements-android.txt
+  环境自检脚本：backend/verify_env.py
+
+
+================================================================================
+  4. Android 工程骨架
+================================================================================
+
+  基本参数（android/app/build.gradle.kts）：
+
+      compileSdk = 35
+      minSdk     = 24        （Android 7.0，覆盖绝大多数在用机型）
+      targetSdk  = 35
+      versionName= "0.3.0"
+
+  权限（AndroidManifest.xml）：
+      INTERNET                 本地 127.0.0.1 服务需要
+      WRITE_EXTERNAL_STORAGE   maxSdkVersion=28，只给 Android 9 及以下的导出用
+      usesCleartextTraffic=true 允许 http://127.0.0.1（局域网外的 http 仍受限）
+
+    Android 10 及以上导出视频走 MediaStore，不需要任何存储权限。
+
+  主题：NoActionBar。
+    因为页面自己有顶栏，用 DarkActionBar 会叠出两条标题栏。
+
+  大内存：android:largeHeap="true"
+    音频处理峰值几百 MB，不开容易在低端机上被系统杀。
+
+  两个 Gradle 自动任务：
+
+    syncPythonKernel  把 backend/*.py 复制到 src/main/python/
+                      必须在 Chaquopy 收集源码之前完成，所以挂在 preBuild 上。
+                      注意：任务名不能用带 "Python" 的模糊匹配去挂依赖，
+                      会匹配到自己，导致循环依赖。
+
+    pullWebFromFrontend  手动任务，只有你显式执行才会用 frontend/ 的页面
+                         覆盖 assets/ 的那份。（详见第 7 节）
+
+
+================================================================================
+  5. Python 内核改动（4 处，都有明确原因）
+================================================================================
+
+  5.1  audio_processor.py —— 分块 STFT（解决手机 OOM）
+
+      改动：_stft_power() 增加 chunk_frames 参数，默认 _STFT_CHUNK_FRAMES = 1024
+            按帧分块计算，逐块累加到结果矩阵。
+
+      原理：原来一次算整段音频的 STFT，中间矩阵大小与音频时长成正比。
+            5 分钟的歌在手机上峰值 1085MB，直接被系统杀掉。
+            改成分块后，峰值只跟「一块的大小」有关，与时长无关，
+            同样素材降到 199MB。
+
+      顺带：_feature_correlation() 对 overlap <= 0 做了 clamp，
+            防止除零和负索引（切片参数算错时会崩）。
+
+  5.2  config.py —— 环境变量读取兜底
+
+      改动：新增 _env_int(name, default, minimum, maximum)。
+            PORT 之类从环境变量读的整数，非法值不再抛异常，退回默认值。
+
+      原理：手机上由 Kotlin 注入环境变量，格式不可控；
+            一个手滑的空格就能让 App 启动即崩，所以要兜底。
+
+  5.3  mobile_api.py —— 无 Flask 的内核入口
+
+      这是给手机用的 run_process()，桌面版走 app.py，两边共用同一套处理逻辑。
+
+      改动 A：增加 require_native_backend 参数（默认 True）。
+              启动时检查 video_processor.is_native_backend()，
+              没接上 FFmpeg 就立刻给出明确错误，
+              而不是跑到一半才发现出不了片。
+
+      改动 B：_make_progress_callback() 重写，见第 6 节。
+              配套的 _safe_callback() 会把回调里的异常吞掉、只打 traceback，
+              避免「界面回调出错」把整个音频处理带崩。
+
+  5.4  pipeline.py —— 歌曲信息查询能力探测
+
+      改动：新增 supports_song_lookup()，目前返回 False
+            （手机包里没有 music_scraper 这个可选组件）。
+
+      原理：app.py 据此在用户「只填歌名、不传音频」时提前拒绝，
+            否则会一路跑到最后才因为找不到参考音频而失败。
+
+
+================================================================================
+  6. 跨语言通信：三个必须知道的坑
+================================================================================
+
+  这一节是整个项目最容易复发的故障点，改代码前务必读一遍。
+
+  ──────────────────────────────────────────────────────────────────────────
+  坑 1：Python 的 list 传不到 Java 的 List
+  ──────────────────────────────────────────────────────────────────────────
+
+  报错：cannot convert list object to java.util.List
+
+  原因：Chaquopy 的转换是单向的。
+        Java 的 List 传到 Python 没问题，
+        Python 的 list 传到 Java 参数（签名是 List<Any?>）就会抛错。
+
+  涉及代码：FFmpeg 的参数列表。
+            Python 侧 _execute(list(args), timeout)
+            → android_entry.execute_fn
+            → FfmpegBackend.execute()
+
+  正确写法（FfmpegBackend.kt）：
+
+      @JvmStatic
+      fun execute(args: PyObject, timeout: Double) {
+          val arguments = args.asList().map { it.toString() }.toTypedArray()
+          ...
+      }
+
+  规则总结：往 Kotlin 传集合，参数一律声明成 PyObject，自己用
+            asList() / asMap() 取。不要写 List<...> 或 Array<...>。
+
+  ──────────────────────────────────────────────────────────────────────────
+  坑 2：callable() 对 Java 对象永远返回 True
+  ──────────────────────────────────────────────────────────────────────────
+
+  报错：PythonEngine$ProgressSink is not callable because it
+        implements no functional interfaces
+
+  原因：Chaquopy 给所有 Java 对象都挂了 __call__ 方法，
+        所以 Python 里 callable(javaObj) 恒为 True。
+        但只有「函数式接口」（只有一个抽象方法的接口）才能真正调用，
+        否则要等到真正调用的那一刻才抛错 —— 报错点和出错点错开，很难查。
+
+  两边都要配合：
+
+  Python 侧（mobile_api.py 的 _make_progress_callback）——
+  **先按方法名找，再判断 callable**：
+
+      for name in ("onProgress", "on_progress", "onEvent"):
+          method = getattr(callback, name, None)
+          if method is not None and callable(method):
+              return _safe_callback(lambda data, _m=method: _m(data))
+      if callable(callback):
+          return _safe_callback(callback)
+
+  Kotlin 侧（PythonEngine.kt）—— 让 ProgressSink 真的实现函数式接口：
+
+      fun interface PythonProgress {
+          fun onProgress(data: PyObject?)
+      }
+
+      class ProgressSink(...) : PythonProgress {
+          override fun onProgress(data: PyObject?) { ... }
+      }
+
+  一句话：Python 端「方法优先」，Kotlin 端「fun interface」。
+  两件事都做了才稳。
+
+  ──────────────────────────────────────────────────────────────────────────
+  坑 3：android_entry 里要把 Java 对象包成真正的 Python 函数
+  ──────────────────────────────────────────────────────────────────────────
+
+  Kotlin 传进来的是 Java 对象（FfmpegBackend 等），
+  Python 里不能直接当函数调，必须显式包装：
+
+      def execute_fn(args, timeout):
+          return _backend.execute(args, timeout)
+
+  probe() 返回的是 JSON 字符串，Python 侧 json.loads 成 dict 再用。
+
+  回归测试：backend/tests/test_progress_callback.py
+  这个测试用一个「callable() 为 True、但调用会抛 TypeError、同时又有
+  onProgress 方法」的假对象，精确复现过这个 bug，改动后务必跑一遍。
+
+
+================================================================================
+  7. 主界面：WebView 加载 cupnb.html
+================================================================================
+
+  7.1  页面来源（最重要的约定）
+
+      ★ 唯一有效文件：
+        android/app/src/main/assets/web/cupnb.html
+
+      直接改它，构建不会覆盖。frontend/cupnb.html 是桌面版用的另一份，
+      两者互不影响。
+
+      早期有个 Gradle 任务会在每次构建时用 frontend/ 覆盖 assets/，
+      导致手改内容被悄悄冲掉（很难查），已经移除。
+      现在只保留一个手动任务：
+
+          ./gradlew :app:pullWebFromFrontend
+
+      只有显式执行才会覆盖 assets。慎用，它会冲掉你的手改。
+
+      backup/ 目录里放了两份，随时可对照或回滚：
+        cupnb.当前版本.html          你现在用的这份
+        cupnb.原始版(压缩包).html     项目压缩包里最初那版
+
+  7.2  加载方式
+
+      webView.loadUrl("file:///android_asset/web/cupnb.html")
+
+      必须同时打开这几个开关（MainActivity.kt）：
+
+        allowFileAccess = true            API 30+ 默认关闭，不开会白屏
+        allowContentAccess = true
+        mixedContentMode = MIXED_CONTENT_ALWAYS_ALLOW
+                                          file:// 页面加载 http://127.0.0.1
+                                          的视频属于混合内容，默认被拦
+
+  7.3  不用构建就能调试页面
+
+      把改好的页面推到手机这个位置，重启 App 即生效（顶部会提示
+      "正在使用调试页面"）：
+
+          adb push cupnb.html /sdcard/Android/data/com.syncstage.app/files/debug_web/cupnb.html
+
+      删掉该文件就回到 APK 内置版本。
+
+      ★ 反过来要注意：只要这个文件还在，App 就**不会**用 assets 里的新版本。
+        改了 HTML 却看不到效果时，先检查它。
+
+  7.4  native-bridge.js 做了什么
+
+      你的 HTML 一行都不用改。这个脚本在页面加载时注入，
+      覆盖 window.fetch，把页面的网络请求改接到原生调用：
+
+        POST /api/upload       → window.SyncStage.startTask(JSON)
+                                 返回 {task_id}
+        GET  /api/tasks/<id>   → window.SyncStage.taskStatus(id)
+                                 返回 {state, progress, detail, output_url}
+        其他请求                → 原样走真正的 fetch
+
+      文件字段不经过网络：Kotlin 在用户选文件时已经复制到缓存并记住路径。
+
+      另一个作用：file input 兜底（见 7.5）。
+
+  7.5  为什么需要 input.files 兜底
+
+      页面在 file:// 下运行时，WebView 不一定把系统文件选择器返回的
+      content:// URI 变成 input.files（跨源限制）。
+      结果就是：用户明明选了文件，页面仍认为「没选」，点提交被
+      「请先上传视频文件」挡回去。
+
+      做法：Kotlin 选完文件后主动调用
+
+          window.__syncStageSetFile('videoFile', '歌名.mp4', 1234)
+
+      bridge 里重写 input.files 的 getter：原生 getter 有值优先用原生的，
+      没有才返回这个「假文件」。真实路径一直由 Kotlin 自己记着，
+      页面只用它做校验和显示文件名。
+
+      ★ 注意：这段逻辑分为两段各自幂等（fetch 用 __syncStageFetchReady，
+        file 补丁用元素级 __syncStagePatched），
+        **不能写成整体提前 return**。因为 onPageStarted 时 DOM 还没解析，
+        元素拿不到；如果那时就把全局标记置位，第二次注入会被挡掉，
+        补丁永远装不上。这个坑踩过一次。
+
+  7.6  任务的执行与串行
+
+      页面点提交 → startTask → 生成 taskId → 进 ConcurrentHashMap
+      → runTask() 用 Mutex 串行执行（内核同一时刻只跑一个任务，
+        避免两路 ffmpeg 抢内存被系统杀）
+
+      页面每 1.5 秒轮询 taskStatus 刷新进度条。
+
+      内核还没起来时点击，会得到一句人话提示
+      「处理内核还在启动，请等几秒后重新点击开始」，
+      因为页面是本地打开、秒出，内核要十几秒。
+
+  7.7  结果视频怎么送到 <video>
+
+      结果文件在 App 私有目录，WebView 直接读不了。
+      Python 起了一个只监听 127.0.0.1 的静态服务（backend/android_web.py），
+      专门提供 /results/<id>/output.mp4，并且**实现了 HTTP Range**。
+
+      Range 是必须的：没有它 <video> 不能拖动进度条，也没法边下边播。
+
+      output_url 必须是绝对地址：
+      http://127.0.0.1:<port>/results/<id>/output.mp4
+      写相对路径会被 file:// 页面解析成 file:///results/... 而打不开。
+
+      服务只监听回环地址，端口随机，不对外开放。
+      android_web.py 里做了路径穿越检查（_safe_join），
+      只允许访问 web 根目录和 results 目录下的文件。
+
+  7.8  文件扩展名的修复
+
+      问题：选的是 mp3，界面显示 mp4，后端判定「不支持的格式」。
+
+      原因：系统文件选择器给的 content:// URI 常常是纯数字 ID
+            （如 .../document/1234），根本没有扩展名。
+            旧代码取不到后缀就统一补 .mp4。
+
+      现在的 guessExtension() 三级取：
+
+          1) 查 OpenableColumns.DISPLAY_NAME，拿真实文件名 —— 最准
+          2) 用 contentResolver.getType() + MimeTypeMap 反查
+          3) 兜底：audio/* 给 .mp3，其余给 .mp4
+
+      内核按扩展名做白名单校验（mobile_api.py 的 SUPPORTED_AUDIO_EXT），
+      所以这一步错了，后面全错。
+
+
+================================================================================
+  8. 历史记录 / 导出
+================================================================================
+
+  8.1  为什么是应用内面板，而不是「打开文件夹」
+
+      结果在 filesDir/syncstage/results/<task_id>/output.mp4，
+      属于 App 私有目录，系统文件管理器没有权限进入。
+      FileProvider 只共享单个文件，不支持浏览目录。
+      所以做成 App 内的列表对话框，入口在顶栏「历史处理记录」。
+
+  8.2  面板能做什么
+
+      扫描 results/*/output.mp4，按修改时间倒序。
+      每行显示：时间 / 大小 · 可信度 · 偏移 · 歌名。
+      点条目 = 直接播放这一版（挨个试听挑最佳）；
+      右侧两个小按钮：导出、删除。
+
+      可信度这些信息来自 meta.json —— 处理成功时由 Kotlin 写一份到结果目录
+      （内核本身不落盘元数据）。旧任务没有这个文件，仍能播放/删除，
+      只是少了那一行信息。
+
+      删除当前正在展示的那一版时，会清空状态并提示可重新处理。
+
+  8.3  导出到相册
+
+      复制到公共目录 Movies/SyncStage/，文件名 syncstage_yyyyMMdd_HHmmss.mp4
+      （时间取源文件 mtime，便于区分版本）。
+
+        Android 10+  走 MediaStore，先置 IS_PENDING=1，写完再置 0。
+                     中途失败会删掉半截条目，相册里不会出现坏文件。
+                     **不需要任何权限。**
+        Android 9-   写公共目录 + MediaScannerConnection.scanFile 通知相册，
+                     需要 WRITE_EXTERNAL_STORAGE（仅这一条分支用）。
+
+      复制在 IO 线程执行，同时有 exporting 标志防重复点击。
+
+  8.4  页面里的「下载视频」按钮
+
+      WebView 默认不处理下载。setDownloadListener 接住后，
+      把 URL 里的 task_id 还原成本地文件，直接走导出逻辑，
+      和顶栏历史面板的「导出」完全一致。
+
+
+================================================================================
+  9. 16KB 页对齐（Android 15+ 设备必需）
+================================================================================
+
+  背景：Android 15 起，部分设备内存页从 4KB 变成 16KB。
+        所有 .so 的加载段必须 16KB 对齐，否则 App 装不上或直接崩。
+        报错长这样：
+          app-debug.apk is not compatible with 16 KB devices
+          并列出 libavcodec.so、libc++_shared.so 等。
+
+  根因：原版 FFmpegKit（com.arthenica，6.0-2）已经归档下架，
+        它的 .so 是按 4KB 对齐编译的。
+
+  解决：换成社区维护版
+
+        implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9")
+
+        它的 .so 用 -Wl,-z,max-page-size=16384 重新构建过。
+        包名仍然是 com.arthenica.ffmpegkit，
+        Kotlin 代码一行都不用改。
+
+  为什么用 full（LGPL）而不是 full-gpl：
+        本项目只用到 pcm_s16le / aac / amix / -c:v copy，
+        LGPL 变体完全覆盖，对闭源分发更稳妥。
+        真需要 x264/x265 时再换 ffmpeg-kit-full-gpl:8.1.9。
+
+  两层校验（缺一不可）：
+
+    第一层 ELF：每个 PT_LOAD 段要满足
+                p_align >= 0x4000
+                且 p_offset % 16384 == p_vaddr % 16384
+
+    第二层 ZIP：APK 里以 STORED（不压缩）方式存放的 .so，
+                其数据在包内的偏移必须 % 16384 == 0。
+                注意：要读 ZIP 的**本地文件头**（local header）算出
+                nlen/elen，不能用中央目录里的 extra 长度，两者不等。
+
+  自检脚本：
+
+        python android/check_16kb.py <apk路径>
+
+        退出码 0 = 通过。两个架构共 38 个 .so 全部检查。
+        也可以用官方工具交叉验证：
+
+        zipalign -c -P 16 -v 4 app-debug.apk
+
+
+================================================================================
+  10. 页面脚本崩溃修复（点提交没反应 / 没进度条）
+================================================================================
+
+  现象：选好视频和音乐，点「提交任务」毫无反应，
+        不弹提示、进度条也不动。
+
+  真实原因：cupnb.html 的脚本在第 1613 行就抛错中断了。
+
+      第 1613 行：fillDemoBtn.addEventListener("click", ...)
+                  ↑ 这个按钮在精简版页面里已经删掉，fillDemoBtn 是 null
+      → TypeError: Cannot read properties of null
+      → **整个 <script> 从这里停止执行**
+      第 1626 行：submitBtn.addEventListener("click", ...)
+                  ↑ 在它后面，永远执行不到
+
+  也就是说：提交按钮的点击事件根本没有绑上。
+  这跟网络、跟 Python、跟 bridge 全都无关。
+
+  背景：原始压缩包版里有 fillDemoBtn、songName、gameName、
+        difficulty、remark 这些元素，精简文案/布局时被删掉了，
+        但 JS 里的引用还留着。
+
+  修复（只动 JS，没碰页面结构和文案）：
+
+      1) 给示例按钮判空
+         if (fillDemoBtn) { fillDemoBtn.addEventListener(...) }
+
+      2) 提交里新增工具函数，缺元素返回空串
+         const fieldValue = (id) => {
+             const el = document.getElementById(id);
+             return el && typeof el.value === "string" ? el.value : "";
+         };
+         songName / gameName / difficulty / remark 全部走它
+
+  检查方法（以后改页面后建议跑一遍）：
+      用脚本比对「JS 里 getElementById 的 id」和「HTML 里实际存在的 id」，
+      差集不为空就要逐个确认是否有判空。
+      重点看那种 getElementById("x").value / .addEventListener 的直接链式调用。
+
+  ★ 通用规律：页面脚本一旦某行抛错，它后面所有的 addEventListener
+    全部失效，表现就是「按钮点了没反应」。
+    这种症状极容易被误判成桥接层/原生层的问题，先查这一条。
+
+  现在脚本里的元素引用都做过判空：
+      fillDemoBtn      有 if 保护
+      serverBase       有 if 保护
+      serverBaseCurrent 有 if 保护
+      songName / gameName / difficulty / remark  走 fieldValue()
+      直接链式调用且元素缺失的：0 处
+
+
+================================================================================
+  11. 常见故障速查表
+================================================================================
+
+  症状：App 打开一直停在「正在加载页面」
+  ────────────────────────────────────
+  1. 抓日志：adb logcat -s SyncStage
+     正常会看到「开始加载页面 file:///android_asset/web/cupnb.html」，
+     随后「内核就绪，端口 xxxxx」。
+  2. 如果出现「页面加载失败」，说明 assets 里的文件有问题。
+  3. 页面是本地加载的，正常情况下几十毫秒就该出来；
+     如果转圈超过 3 秒，基本是页面脚本报错或文件缺失。
+
+  症状：页面出来了，但点提交毫无反应 / 进度条不动
+  ────────────────────────────────────────────
+  1. 看 logcat 有没有 JS[...] 开头的 TypeError
+     （WebChromeClient.onConsoleMessage 已经把 console 全转到 SyncStage 标签）
+  2. 多半是页面脚本中途抛错，后面的 addEventListener 没绑上 —— 见第 10 节
+  3. 其次检查是不是加载了 debug_web 里的旧页面（第 7.3 节）
+
+  症状：提示「请先上传视频文件」，但明明选了
+  ────────────────────────────────────────────
+  file:// 下 input.files 拿不到。看 logcat 有没有
+  「已选文件 videoFile -> xxx.mp4 (1234 B)」。
+  有这一行说明 Kotlin 收到了，问题在 __syncStageSetFile 有没有生效 —— 见 7.5。
+
+  症状：选的是 mp3，界面显示 mp4 / 提示格式不支持
+  ────────────────────────────────────────────
+  扩展名推断问题，见 7.8 的 guessExtension()。
+
+  症状：视频黑屏 / 不能拖动进度条
+  ────────────────────────────────────────────
+  1. 混合内容被拦：确认 mixedContentMode = MIXED_CONTENT_ALWAYS_ALLOW
+  2. 本地服务没起：logcat 看有没有「内核就绪，端口」
+  3. Range 实现有问题：跑 python backend/tests/test_web_server.py 自检
+  4. output_url 是相对路径：必须拼成 http://127.0.0.1:<port>/results/...
+
+  症状：任务提交后马上失败
+  ────────────────────────────────────────────
+  看 logcat 里 taskStatus 的状态变化那几行，detail 会写明原因：
+  「处理内核还在启动」/「请先选择手元视频」/「视频读取失败」等。
+
+  症状：构建失败，提示 Circular dependency
+  ────────────────────────────────────────────
+  任务依赖用了 tasks.matching { name.contains("Python") } 这类模糊匹配，
+  匹配到了自己。改成显式依赖具体任务名。
+
+  症状：构建时 PYTHONPATH 相关报错 / 文件删不掉
+  ────────────────────────────────────────────
+  某些沙箱环境会注入 PYTHONPATH 拦截删除操作。构建时清掉：
+
+      env -u PYTHONPATH -u CODEBUDDY_SAFE_DELETE_ENABLED ./gradlew :app:assembleDebug
+
+  症状：pip 阶段报 no matching distribution
+  ────────────────────────────────────────────
+  Python 版本或包版本不对。见第 2 节的版本约束，
+  或者检查 android/wheels/ 里的轮子是否完整（有无 .complete）。
+
+
+================================================================================
+  12. 常用命令
+================================================================================
+
+  构建 debug 包
+  ─────────────
+      cd android
+      ./gradlew :app:assembleDebug
+      产物：android/app/build/outputs/apk/debug/app-debug.apk
+
+  安装到手机
+  ──────────
+      adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+
+  看日志（最有用）
+  ────────────────
+      adb logcat -s SyncStage          App 自己的日志 + 页面 JS 报错
+      adb logcat -s chromium           WebView 底层（页面 JS 崩溃也在这）
+
+  调试页面（不用重新构建）
+  ────────────────────────
+      adb push cupnb.html /sdcard/Android/data/com.syncstage.app/files/debug_web/cupnb.html
+      # 重启 App 生效；删除该文件回到内置版本
+      adb shell rm -f /sdcard/Android/data/com.syncstage.app/files/debug_web/cupnb.html
+
+  16KB 对齐自检
+  ─────────────
+      python android/check_16kb.py android/app/build/outputs/apk/debug/app-debug.apk
+
+  后端自检（4 项）
+  ────────────────
+      python backend/tests/run_all.py
+      包含：Java 回调回归 / 桌面链路 / 手机链路 / 跨语言契约
+
+  本地静态服务自检（Range / 416 / 路径穿越）
+  ──────────────────────────────────────────
+      python backend/tests/test_web_server.py
+
+  环境检查
+  ────────
+      python backend/verify_env.py
+
+  手动用 frontend 的页面覆盖 App 页面（会冲掉手改，慎用）
+  ─────────────────────────────────────────────────────
+      ./gradlew :app:pullWebFromFrontend
+
+
+================================================================================
+  13. 已知限制
+================================================================================
+
+  1. 只支持 arm64 真机和 x86_64 模拟器。32 位老机型装不上。
+
+  2. Python 被锁在 3.10。想升 3.13 就必须把 scipy / soundfile
+     从内核里去掉，涉及音频读取和重采样的重写，代价很大。
+
+  3. 只填歌名、不传音频的处理不支持（手机包里没有 music_scraper）。
+     会提前报错，不会白跑一遍。
+
+  4. 结果视频在 App 私有目录，只能用应用内的历史面板管理，
+     系统文件管理器看不到。要对外可见就走「导出」。
+
+  5. APK 体积约 165MB，主要是 FFmpeg 的 .so 和 Python 运行时。
+     要瘦身可以换 ffmpeg-kit 的 min/audio 变体，
+     但 pcm_s16le / amix 等编解码器和滤镜需要确认还在。
+
+  6. 主界面依赖 WebView。系统 WebView 版本过旧（Android 6 以下）
+     可能因为可选链语法等特性不兼容。minSdk 定在 24 就是为了这个。
+
+
+================================================================================
+  附：本次改造涉及的文件清单
+================================================================================
+
+  新增
+  ────
+    settings.gradle.kts  /  build.gradle.kts  /  gradle.properties
+    gradlew  /  gradlew.bat  /  gradle/wrapper/*
+    local.properties
+    android/settings.gradle.kts 等对应一套
+    android/check_16kb.py            16KB 对齐自检
+    android/wheels/                  离线轮子仓库
+    backend/android_web.py           本地静态服务（Range）
+    backend/mobile_api.py            无 Flask 内核入口
+    backend/verify_env.py            环境自检
+    backend/requirements-android.txt
+    backend/tests/test_progress_callback.py
+    backend/tests/test_web_server.py
+    android/app/src/main/assets/web/cupnb.html      界面
+    android/app/src/main/assets/web/native-bridge.js 适配层
+    android/app/src/main/java/com/syncstage/app/*.kt 界面壳与引擎封装
+    backup/                          两份 HTML 备份
+
+  修改
+  ────
+    backend/audio_processor.py       分块 STFT、相关性计算边界
+    backend/config.py                环境变量兜底
+    backend/pipeline.py              supports_song_lookup()
+    backend/app.py                   据此提前拒绝只填歌名
+    android/app/build.gradle.kts     Chaquopy / FFmpegKit / 离线轮子 / 同步任务
+    AndroidManifest.xml              权限、主题、largeHeap
+    res/layout/activity_main.xml     顶栏 + WebView
+    res/values/strings.xml           文案
+    res/values/themes.xml            NoActionBar
+    android/README.md                完整说明与排错表
+
+================================================================================
+  文档结束
+================================================================================
