@@ -1610,18 +1610,29 @@
     originalVolume.addEventListener("input", () => updateRangeDisplay(originalVolume, originalVolumeValue));
     alignedVolume.addEventListener("input", () => updateRangeDisplay(alignedVolume, alignedVolumeValue));
 
-    fillDemoBtn.addEventListener("click", () => {
-      document.getElementById("songName").value = "Grievous Lady";
-      document.getElementById("gameName").value = "Arcaea";
-      document.getElementById("difficulty").value = "Future / Expert";
-      originalVolume.value = "0.4";
-      alignedVolume.value = "0.8";
-      updateRangeDisplay(originalVolume, originalVolumeValue);
-      updateRangeDisplay(alignedVolume, alignedVolumeValue);
-      document.getElementById("remark").value =
-        "视频开头有短暂黑屏，建议从主旋律进入前后进行峰值匹配。";
-      showToast("已填充示例内容，请手动选择视频和音频文件");
-    });
+    /*
+      ⚠️ 这个「填充示例」按钮在当前页面里已经不存在了（id 被删掉）。
+      如果不判空，第 1613 行会抛 TypeError（Cannot read properties of null），
+      **整段脚本就此中断**——后面的「提交任务」按钮根本没绑定上，
+      于是点提交毫无反应、进度条也永远不出现。这是必须判空的。
+    */
+    if (fillDemoBtn) {
+      fillDemoBtn.addEventListener("click", () => {
+        const setField = (id, value) => {
+          const el = document.getElementById(id);
+          if (el) el.value = value;
+        };
+        setField("songName", "Grievous Lady");
+        setField("gameName", "Arcaea");
+        setField("difficulty", "Future / Expert");
+        originalVolume.value = "0.4";
+        alignedVolume.value = "0.8";
+        updateRangeDisplay(originalVolume, originalVolumeValue);
+        updateRangeDisplay(alignedVolume, alignedVolumeValue);
+        setField("remark", "视频开头有短暂黑屏，建议从主旋律进入前后进行峰值匹配。");
+        showToast("已填充示例内容，请手动选择视频和音频文件");
+      });
+    }
 
     submitBtn.addEventListener("click", async () => {
       if (isSubmitting) {
@@ -1629,8 +1640,17 @@
         return;
       }
 
-      const songName = document.getElementById("songName").value.trim();
-      const gameName = document.getElementById("gameName").value.trim();
+      /*
+        精简版页面把这些输入框去掉了，直接 getElementById(...).value 会抛
+        「Cannot read properties of null」。缺了就当空串，提交照常进行。
+      */
+      const fieldValue = (id) => {
+        const el = document.getElementById(id);
+        return el && typeof el.value === "string" ? el.value : "";
+      };
+
+      const songName = fieldValue("songName").trim();
+      const gameName = fieldValue("gameName").trim();
       const file = videoFile.files[0];
       const audio = audioFile.files[0];
 
@@ -1656,10 +1676,10 @@
         }
         formData.append("songName", songName);
         formData.append("gameName", gameName);
-        formData.append("difficulty", document.getElementById("difficulty").value);
+        formData.append("difficulty", fieldValue("difficulty"));
         formData.append("originalVolume", originalVolume.value);
         formData.append("alignedVolume", alignedVolume.value);
-        formData.append("remark", document.getElementById("remark").value);
+        formData.append("remark", fieldValue("remark"));
 
         showToast("正在上传...");
         const res = await fetch(`${API_BASE_URL}/api/upload`, {

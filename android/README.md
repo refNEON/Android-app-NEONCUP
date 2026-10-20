@@ -290,4 +290,7 @@ Kotlin 在回调里顺手把内容复制到缓存（`copyToCache`），Python �
 | 页面正常但点"开始"提示内核还在启动 | 正常现象：首次启动 CPython + 加载 numpy/scipy 要十几秒。`adb logcat -s SyncStage python.stderr` 看 `bootstrap ->` 和「内核就绪，端口」 |
 | 页面正常但结果视频黑屏 | `output_url` 必须是绝对地址 `http://127.0.0.1:<port>/results/…`；从 file:// 页面播 http 视频还需要 `mixedContentMode = MIXED_CONTENT_ALWAYS_ALLOW` |
 | 页面加载出来但点"上传"没反应 | `onShowFileChooser` 没接住，看是不是被别的 WebView 覆盖；`accept` 类型只支持 `video/*` 和 `audio/*` |
+| 选完文件仍提示"请先上传视频文件" | file:// 页面下 WebView 不一定把 `content://` URI 变成 `input.files`。`MainActivity.notifyFilePicked()` 会调用 `window.__syncStageSetFile()` 兜底注入一个假 File；`adb logcat -s SyncStage` 应能看到「已选文件 videoFile -> xxx.mp4」 |
+| 点"提交任务"没进度条 | 先看 `adb logcat -s SyncStage`：应有 `startTask -> <id> payload=...`。没有说明页面 JS 报错了（bridge 已把页面 console 转发到 logcat，搜 `JS[`）；有但立刻失败，会打出 `任务 <id> -> FAILURE ...` |
+| 页面 JS 报错看不到 | `WebChromeClient.onConsoleMessage` 已把所有 console 输出转发到 logcat（tag `SyncStage`，格式 `JS[文件:行号] 信息`） |
 | 结果视频不能拖动 | 本地服务的 Range 实现有问题，跑 `python backend/tests/test_web_server.py` 自检 |

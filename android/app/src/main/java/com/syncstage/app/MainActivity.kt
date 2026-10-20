@@ -16,6 +16,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -115,6 +116,11 @@ class MainActivity : AppCompatActivity() {
         // 先把 Uri 还给网页：它要用这个显示文件名
         callback.onReceiveValue(arrayOf(uri))
 
+        // 页面跑在 file:// 下，WebView 不一定把 content:// URI 变成 input.files
+        // （file:// 源访问 content:// 会被拒绝），那样页面会一直提示"请先上传视频"。
+        // 这里额外把「选好了」这件事直接告诉页面做兜底，见 native-bridge.js。
+        notifyFilePicked(if (kind == "audio") "audioFile" else "videoFile", uri)
+
         // 再把内容复制到缓存：Python 只认本地路径，且必须保留扩展名
         when (kind) {
             "audio" -> musicSource = lifecycleScope.async(Dispatchers.IO) {
@@ -124,6 +130,31 @@ class MainActivity : AppCompatActivity() {
                 copyToCache(uri, "input_video")
             }
         }
+    }
+
+    /** 告诉页面"这个文件已经选好了"，并打印诊断日志。 */
+    private fun notifyFilePicked(inputId: String, uri: Uri) {
+        val name = runCatching {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (cursor.moveToFirst()) {
+                    val display = if (index >= 0) cursor.getString(index) else null
+                    val size = if (sizeIndex >= 0) cursor.getLong(sizeIndex) else 0L
+                    display to size
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
+
+        val display = name?.first ?: uri.lastPathSegment ?: "$inputId"
+        val size = name?.second ?: 0L
+        Log.i(TAG, "已选文件 $inputId -> $display ($size B) uri=$uri")
+
+        val call = "window.__syncStageSetFile && window.__syncStageSetFile(" +
+            "${JSONObject.quote(inputId)}, ${JSONObject.quote(display)}, $size)"
+        webView.evaluateJavascript(call, null)
     }
 
     // ---- 导出到公共「影片/SyncStage」----
@@ -172,6 +203,23 @@ class MainActivity : AppCompatActivity() {
             downloadVideo(url)
         }
         webView.webChromeClient = object : WebChromeClient() {
+
+            /**
+             * 把页面的 console 输出转发到 logcat（tag SyncStage）。
+             * 页面有自己的 UI，JS 报错在界面上看不到，只能靠这里。
+             * 排查"点了没反应"时先看它。
+             */
+            override fun onConsoleMessage(message: ConsoleMessage?): Boolean {
+                val m = message ?: return false
+                val text = "JS[${m.sourceId()}:${m.lineNumber()}] ${m.message()}"
+                when (m.messageLevel()) {
+                    ConsoleMessage.MessageLevel.ERROR -> Log.e(TAG, text)
+                    ConsoleMessage.MessageLevel.WARNING -> Log.w(TAG, text)
+                    else -> Log.i(TAG, text)
+                }
+                return true
+            }
+
             override fun onShowFileChooser(
                 view: WebView?,
                 callback: ValueCallback<Array<Uri>>?,
@@ -285,7 +333,7 @@ class MainActivity : AppCompatActivity() {
      *    **不用重新构建 APK**。不需要任何存储权限，`adb push` 直接可写。
      *    删掉这个文件就回到 assets 里的正式版本。
      * 2. `file:///android_asset/web/cupnb.html`
-     *    正式来源，由 frontend/cupnb.html 在构建时同步过来。
+     *    正式来源，就是 App 工程里的那个文件，想改界面直接改它。
      */
     private fun resolvePageUrl(): String {
         val override = getExternalFilesDir(null)?.let { File(it, "debug_web/cupnb.html") }
@@ -327,10 +375,17 @@ class MainActivity : AppCompatActivity() {
 
     inner class Bridge {
 
+        /** 页面想主动往 logcat 写东西时用（adb logcat -s SyncStage）。 */
+        @JavascriptInterface
+        fun log(message: String) {
+            Log.i(TAG, "JS: $message")
+        }
+
         /** 网页提交任务。返回 taskId，进度用 taskStatus 轮询。 */
         @JavascriptInterface
         fun startTask(payload: String): String {
             val taskId = UUID.randomUUID().toString().replace("-", "").take(12)
+            Log.i(TAG, "startTask -> $taskId payload=$payload")
             tasks[taskId] = TaskSnapshot("PENDING", 0.0, "已提交，准备处理")
             lifecycleScope.launch { runTask(taskId, payload) }
             return taskId
