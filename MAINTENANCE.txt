@@ -19,6 +19,11 @@
     - app.py       Flask 后端，提供 /api/upload、/api/tasks/<id>
     - frontend/cupnb.html   网页界面
 
+  【2026-10-21 变更】桌面版已整体删除：app.py / task.py / celery_app.py /
+  start.bat / verify_env.py / test.py / requirements*.txt / frontend/cupnb.html
+  均已移出工程，backend/ 只剩 6 个内核文件。下文提到桌面壳子的地方，
+  都是「当初改造时怎么想」的历史说明，代码已不存在。
+
   手机上没有 Flask，也没有 Python 环境。做法是：
 
      ┌─────────────────────────────────────────────────────┐
@@ -66,7 +71,8 @@
      全程没有上传行为，也没有 base64 编码的开销。
 
   3) 界面的唯一来源是 assets 里的 cupnb.html
-     构建过程不会从 frontend/ 覆盖它。改页面只改那一个文件。
+     构建过程不会覆盖它。改页面只改那一个文件。
+     （桌面版 frontend/cupnb.html 已于 2026-10-21 删除，全工程就这一份页面。）
 
 
 ================================================================================
@@ -81,9 +87,11 @@
   ├── gradle/wrapper/           ← 新增（含 gradle-wrapper.jar）
   ├── local.properties          ← 新增（sdk.dir 指向本机 Android SDK）
   │
-  ├── backend/                  ← Python 内核（同时也被 App 复用）
-  ├── frontend/                 ← 桌面版网页（与 App 互不影响）
-  ├── backup/                   ← 两份 HTML 备份，见第 7 节
+  ├── backend/                  ← Python 内核（App 直接复用，只剩 6 个文件）
+  │     config.py / pipeline.py / audio_processor.py / video_processor.py
+  │     mobile_api.py / android_web.py   ← 这 6 个就是全部，少一个就 ImportError
+  │     tests/                  ← 内核端到端测试（run_all.py）
+  ├── backup/                   ← HTML 备份 + 桌面版删除前的补丁，见第 7 节
   │
   └── android/
       ├── settings.gradle.kts   ← android/ 独立打开时用这套
@@ -161,9 +169,8 @@
     目录不完整（没有 .complete）就自动回到联网模式，不会卡死。
     换机器 / 升级依赖时，把这个目录一起拷走即可。
 
-  桌面侧依赖：backend/requirements.txt
   手机侧依赖清单：backend/requirements-android.txt
-  环境自检脚本：backend/verify_env.py
+  （桌面侧 requirements.txt / verify_env.py 已随桌面版删除）
 
 
 ================================================================================
@@ -190,15 +197,15 @@
   大内存：android:largeHeap="true"
     音频处理峰值几百 MB，不开容易在低端机上被系统杀。
 
-  两个 Gradle 自动任务：
+  一个 Gradle 自动任务：
 
-    syncPythonKernel  把 backend/*.py 复制到 src/main/python/
+    syncPythonKernel  把 backend/ 的 6 个内核文件复制到 src/main/python/
                       必须在 Chaquopy 收集源码之前完成，所以挂在 preBuild 上。
                       注意：任务名不能用带 "Python" 的模糊匹配去挂依赖，
                       会匹配到自己，导致循环依赖。
 
-    pullWebFromFrontend  手动任务，只有你显式执行才会用 frontend/ 的页面
-                         覆盖 assets/ 的那份。（详见第 7 节）
+  曾经还有一个 pullWebFromFrontend（手动把 frontend/ 的页面覆盖到 assets/），
+  2026-10-21 桌面版删除后已一并移除 —— 现在没有第二份页面可覆盖。
 
 
 ================================================================================
@@ -228,7 +235,8 @@
 
   5.3  mobile_api.py —— 无 Flask 的内核入口
 
-      这是给手机用的 run_process()，桌面版走 app.py，两边共用同一套处理逻辑。
+      这是给手机用的 run_process()，App 的唯一处理入口
+      （桌面版的 app.py 已删除）。
 
       改动 A：增加 require_native_backend 参数（默认 True）。
               启动时检查 video_processor.is_native_backend()，
@@ -246,6 +254,51 @@
 
       原理：app.py 据此在用户「只填歌名、不传音频」时提前拒绝，
             否则会一路跑到最后才因为找不到参考音频而失败。
+
+  5.5  人工对齐延迟（手动覆盖自动对齐）
+
+      解决什么：自动对齐在重复段落、变速、信号很弱的素材上会猜错。
+                用户自己听得出差多少，所以给一个输入框直接指定偏移量，
+                填了就不再猜。
+
+      一个字段贯穿到底的完整链路：
+
+        界面  <input id="userInput">      填 -300 / 0 / 120，单位毫秒
+          ↓   formData.append("manualDelay", 值)
+        页面  fetch('/api/upload')
+          ↓   native-bridge 把 FormData 里的字符串字段组成 payload
+        Kotlin  runTask: options.optString("manualDelay")
+          ↓   PythonEngine.process(manualLagMs = 值)
+        Python  android_entry.start(..., manual_lag_ms)
+          ↓   mobile_api.run_process 里除以 1000 转成秒并校验
+        pipeline.process_video(manual_lag_seconds)
+          ↓   不是 None 就**跳过 align_audio 的搜索**
+        audio_processor.apply_manual_lag()   按给定秒数直接平移
+
+      符号约定（三层完全一致，中间不做任何取反）：
+        正数 = 音乐延后，开头补静音
+        负数 = 音乐提前，掐掉开头
+        和底层 _apply_lag 的正负一致。
+
+      留空 = 自动对齐，行为和以前完全一样。
+
+      校验（两处，纵深防御）：
+        不是数字          -> 「手动延迟不是合法数字」
+        超过 ±60 秒       -> 「手动延迟超出范围（±60 秒）」
+        mobile_api 在跨语言边界拦一次，pipeline 再拦一次。
+
+      结果标识：这类任务的 alignment 里
+        confidence = "manual"、selection_method = "manual_lag"
+        历史面板显示「可信度 manual」，表示是人工指定而非算法评估。
+
+      桌面版当初也支持这条路（frontend 页面提交 manualDelay → app.py 校验 →
+      Celery），该链路已随桌面版删除；现在只有 App 这一条，
+      前端在 assets/web/cupnb.html 里 formData.append("manualDelay", ...)。
+
+      回归测试：backend/tests/test_manual_lag.py
+        造两段同一信号、起点相差 2 秒的音频，
+        验证 -2.0 秒能精确拉回、+0.5 秒能精确推后（误差 < 10ms），
+        同时验证毫秒字符串解析和越界拦截。
 
 
 ================================================================================
@@ -343,20 +396,18 @@
       ★ 唯一有效文件：
         android/app/src/main/assets/web/cupnb.html
 
-      直接改它，构建不会覆盖。frontend/cupnb.html 是桌面版用的另一份，
-      两者互不影响。
+      直接改它，构建不会覆盖。2026-10-21 起这是全工程唯一的页面文件 ——
+      桌面版的 frontend/cupnb.html 已删除，桌面版也不存在了。
 
       早期有个 Gradle 任务会在每次构建时用 frontend/ 覆盖 assets/，
-      导致手改内容被悄悄冲掉（很难查），已经移除。
-      现在只保留一个手动任务：
+      导致手改内容被悄悄冲掉（很难查），当时改成了手动任务
+      pullWebFromFrontend；桌面版删除后这个手动任务也一并移除了。
+      现在没有任何任务会碰 assets/web/，改它就是最终结果。
 
-          ./gradlew :app:pullWebFromFrontend
-
-      只有显式执行才会覆盖 assets。慎用，它会冲掉你的手改。
-
-      backup/ 目录里放了两份，随时可对照或回滚：
-        cupnb.当前版本.html          你现在用的这份
+      backup/ 目录里放了三份，随时可对照或回滚：
+        cupnb.当前版本.html          改造后用的那份
         cupnb.原始版(压缩包).html     项目压缩包里最初那版
+        cupnb.桌面版(删除前).html     桌面版最后状态（2026-10-21 删除前留档）
 
   7.2  加载方式
 
@@ -695,22 +746,21 @@
   ─────────────
       python android/check_16kb.py android/app/build/outputs/apk/debug/app-debug.apk
 
-  后端自检（4 项）
+  后端自检（5 项）
   ────────────────
       python backend/tests/run_all.py
-      包含：Java 回调回归 / 桌面链路 / 手机链路 / 跨语言契约
+      包含：Java 回调回归 / 人工延迟 / 整链路出片 / 手机链路 / 跨语言契约
+      （需要 numpy / scipy / soundfile + 系统 ffmpeg；以前用 .venv 跑，
+        .venv 已随桌面版删除，要跑测试自己建一个虚拟环境装依赖即可）
 
   本地静态服务自检（Range / 416 / 路径穿越）
   ──────────────────────────────────────────
       python backend/tests/test_web_server.py
 
-  环境检查
-  ────────
-      python backend/verify_env.py
-
-  手动用 frontend 的页面覆盖 App 页面（会冲掉手改，慎用）
-  ─────────────────────────────────────────────────────
-      ./gradlew :app:pullWebFromFrontend
+  桌面版已删除，以下命令不再存在：
+      python backend/app.py            （Flask 后台）
+      python backend/verify_env.py     （环境自检）
+      ./gradlew :app:pullWebFromFrontend  （用 frontend 覆盖 assets）
 
 
 ================================================================================
@@ -750,27 +800,34 @@
     android/wheels/                  离线轮子仓库
     backend/android_web.py           本地静态服务（Range）
     backend/mobile_api.py            无 Flask 内核入口
-    backend/verify_env.py            环境自检
     backend/requirements-android.txt
     backend/tests/test_progress_callback.py
     backend/tests/test_web_server.py
     android/app/src/main/assets/web/cupnb.html      界面
     android/app/src/main/assets/web/native-bridge.js 适配层
     android/app/src/main/java/com/syncstage/app/*.kt 界面壳与引擎封装
-    backup/                          两份 HTML 备份
+    backup/                          HTML 备份
 
   修改
   ────
     backend/audio_processor.py       分块 STFT、相关性计算边界
     backend/config.py                环境变量兜底
     backend/pipeline.py              supports_song_lookup()
-    backend/app.py                   据此提前拒绝只填歌名
     android/app/build.gradle.kts     Chaquopy / FFmpegKit / 离线轮子 / 同步任务
     AndroidManifest.xml              权限、主题、largeHeap
     res/layout/activity_main.xml     顶栏 + WebView
     res/values/strings.xml           文案
     res/values/themes.xml            NoActionBar
     android/README.md                完整说明与排错表
+
+  2026-10-21 删除（桌面版整体下线，只留 App）
+  ────────────────────────────────────────────
+    backend/app.py  celery_app.py  task.py  start.bat
+    backend/verify_env.py  test.py  requirements.txt  requirements.lock.txt
+    backend/__pycache__  uploads/  temp/  results/  reference_audio/
+    frontend/  （只剩 cupnb.html 一份页面，已备份到 backup/）
+    .venv/     （335 MB 桌面开发虚拟环境）
+    桌面版未提交的改动留档：backup/desktop-uncommitted-20261021/desktop.patch
 
 ================================================================================
   文档结束

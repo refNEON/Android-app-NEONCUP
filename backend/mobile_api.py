@@ -25,6 +25,7 @@ run_process() 是同步阻塞的，必须在非 UI 线程调用（Android 侧用
 调用方保证。
 """
 import json
+import math
 import os
 import uuid
 import warnings
@@ -160,6 +161,7 @@ def run_process(
     task_id=None,
     progress_callback=None,
     require_native_backend=True,
+    manual_lag_ms=None,
 ):
     """
     在后台线程里跑一次“对齐 + 混音 + 出片”。
@@ -210,6 +212,27 @@ def run_process(
         if aligned_volume is None:
             aligned_volume = Config.ALIGNED_VOLUME
 
+        # 人工对齐延迟（毫秒）：
+        #   未填 / 空串 / None  -> 走自动对齐（manual_lag_seconds=None）
+        #   填了数字            -> 直接按这个数平移，跳过自动搜索
+        # 正数 = 音乐延后，负数 = 音乐提前，与界面提示一致。
+        manual_lag_seconds = None
+        raw_lag = "" if manual_lag_ms is None else str(manual_lag_ms).strip()
+        if raw_lag:
+            try:
+                manual_lag_seconds = float(raw_lag) / 1000.0
+            except (TypeError, ValueError):
+                raise ValueError(f"手动延迟不是合法数字: {manual_lag_ms!r}")
+
+            # 在跨语言边界上就拦住越界值，错误信息比让 pipeline 抛更直接。
+            if not math.isfinite(manual_lag_seconds):
+                raise ValueError("手动延迟必须是有限数值")
+            if abs(manual_lag_seconds) > Config.MAX_SHIFT_SECONDS:
+                raise ValueError(
+                    "手动延迟超出范围"
+                    f"（±{Config.MAX_SHIFT_SECONDS:.0f} 秒）"
+                )
+
         result = process_video(
             video_path=video_path,
             song_name=song_name,
@@ -219,6 +242,7 @@ def run_process(
             aligned_volume=aligned_volume,
             task_id=task_id,
             progress_callback=_make_progress_callback(progress_callback),
+            manual_lag_seconds=manual_lag_seconds,
         )
 
         # 统一状态，并保证可序列化。

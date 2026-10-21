@@ -87,6 +87,10 @@ object PythonEngine {
     /**
      * 跑一次任务。[onProgress] 会在 **Python 所在线程** 被调用，
      * 调用方需要自己切回主线程更新 UI。
+     *
+     * [manualLagMs] 是用户手填的「手动对齐延迟」，单位毫秒，字符串形式
+     * （页面上就是文本框，取出来原样传）。正数延后、负数提前；
+     * 空串表示不手动干预，走自动对齐。
      */
     suspend fun process(
         context: Context,
@@ -94,6 +98,7 @@ object PythonEngine {
         musicPath: String?,
         originalVolume: Double,
         alignedVolume: Double,
+        manualLagMs: String = "",
         onProgress: (status: String, progress: Double, detail: String) -> Unit,
     ): String = withContext(Dispatchers.Default) {
         ensureStarted(context)
@@ -107,6 +112,7 @@ object PythonEngine {
             originalVolume,
             alignedVolume,
             sink,
+            manualLagMs,
         ).toString()
 
         // mobile_api 已经保证一定返回可序列化的 JSON。

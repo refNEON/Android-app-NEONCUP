@@ -108,8 +108,9 @@ C:\Users\lenovo\AppData\Local\Android\Sdk\platform-tools\adb.exe devices
 backend/config.py          ┐
 backend/pipeline.py        │
 backend/audio_processor.py ├─► 复制到 android/app/src/main/python/
-backend/video_processor.py │   （桌面壳子 app.py / celery_app.py / task.py 不进包）
-backend/mobile_api.py      ┘
+backend/video_processor.py │
+backend/mobile_api.py      │
+backend/android_web.py     ┘   （桌面壳子 app.py / celery_app.py / task.py 已删除）
 ```
 
 然后 Chaquopy 把 CPython 3.10 + numpy/scipy/soundfile/soxr 打进 APK。

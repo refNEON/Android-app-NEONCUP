@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 TESTS = [
     "test_progress_callback.py",  # Chaquopy Java 回调对象不能被当函数调（真机 bug 回归）
+    "test_manual_lag.py",        # 人工对齐延迟：位移精度 + 毫秒参数解析
     "test_pipeline_smoke.py",   # 桌面链路：合成素材 -> 对齐 -> 出片
     "test_mobile_path.py",      # 用原生后端接口跑一遍（模拟 Kotlin 调用）
     "test_android_bridge.py",   # android_entry.py 的跨语言契约

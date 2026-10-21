@@ -456,6 +456,11 @@ class MainActivity : AppCompatActivity() {
             val originalVolume = options.optString("originalVolume").toDoubleOrNull() ?: 0.4
             val alignedVolume = options.optString("alignedVolume").toDoubleOrNull() ?: 0.8
 
+            // 手填的对齐延迟（毫秒）。空串 = 自动对齐。
+            // 数值合法性交给 Python 侧统一判定（那边有范围和具体报错），
+            // 这里只负责原样透传，避免两套规则不一致。
+            val manualLagMs = options.optString("manualDelay").trim()
+
             updateTask(taskId, "RUNNING", 0.02, "开始处理…")
             val raw = PythonEngine.process(
                 context = this@MainActivity,
@@ -463,6 +468,7 @@ class MainActivity : AppCompatActivity() {
                 musicPath = music,
                 originalVolume = originalVolume,
                 alignedVolume = alignedVolume,
+                manualLagMs = manualLagMs,
             ) { _, progress, detail ->
                 updateTask(taskId, "RUNNING", progress, detail.ifBlank { "处理中" })
             }

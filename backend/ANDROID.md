@@ -10,11 +10,12 @@
 
 ## 一、分层
 
-- 桌面壳子（打包时**不要**带上）：`app.py`、`celery_app.py`、`task.py`、
-  `requirements.txt` 里的 flask/celery/redis。
+- ~~桌面壳子（打包时**不要**带上）：`app.py`、`celery_app.py`、`task.py`、
+  `requirements.txt` 里的 flask/celery/redis。~~
+  **已于 2026-10-21 从工程中删除**，现在只有 App 一条链路。
 - 平台无关内核（要打进 APK）：`config.py`、`pipeline.py`、
   `audio_processor.py`、`video_processor.py`、`mobile_api.py`、
-  `requirements-android.txt`。
+  `android_web.py`、`requirements-android.txt`。
 
 内核只 `import numpy/scipy/soundfile`（`soxr` 可选），不碰 Web 框架，
 也不再依赖 `librosa`（特征提取已改为纯 numpy + scipy，见下）。

@@ -104,9 +104,15 @@ def start(
     original_volume=None,
     aligned_volume=None,
     progress_callback=None,
+    manual_lag_ms=None,
 ):
     """
     在**后台线程**里跑一次对齐 + 混音 + 出片。
+
+    manual_lag_ms:
+        用户手填的「手动对齐延迟」，单位毫秒，字符串或数字都行。
+        正数 = 音乐延后，负数 = 音乐提前。
+        传空串 / None 表示不手动干预，走自动对齐。
 
     返回 JSON 字符串（跨语言边界最稳）：
         {"status": "success", "output_path": ..., ...}
@@ -118,4 +124,5 @@ def start(
         original_volume=original_volume,
         aligned_volume=aligned_volume,
         progress_callback=progress_callback,
+        manual_lag_ms=manual_lag_ms,
     )

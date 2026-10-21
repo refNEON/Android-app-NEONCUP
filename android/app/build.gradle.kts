@@ -7,7 +7,8 @@ plugins {
 // ---------------------------------------------------------------------------
 // 把 backend/ 下的「平台无关内核」同步进 Chaquopy 的 Python 源码目录，
 // 这样内核只维护一份，不用来回复制。
-// 桌面壳子（app.py / celery_app.py / task.py）不会被打进 APK。
+// 桌面壳子（app.py / celery_app.py / task.py）已于 2026-10-21 删除，
+// 下面这 6 个文件是 App 的全部 Python 依赖 —— 少一个就 ImportError。
 // ---------------------------------------------------------------------------
 val kernelFiles = listOf(
     "config.py",
@@ -50,29 +51,11 @@ val syncPythonKernel = tasks.register<Copy>("syncPythonKernel") {
 // ---------------------------------------------------------------------------
 // 主界面的网页就在 src/main/assets/web/，**改这里就是改 App**，构建不会覆盖它。
 //
-// 这里曾经挂过一个自动同步任务（每次构建把 frontend/ 复制过来），
-// 结果手改的内容会被悄悄冲掉，所以现在改成默认不同步：
-//   * 想让 App 变样  -> 直接编辑 src/main/assets/web/cupnb.html，assembleDebug 即可；
-//   * 想拿 frontend/ 那一份覆盖过来 -> 手动跑 ./gradlew :app:pullWebFromFrontend
-//                                     （会覆盖 assets 里的同名文件，慎用）。
-//
-// frontend/cupnb.html 仍是桌面版 Flask 用的页面，两者互不影响。
+// 2026-10-21：桌面版（frontend/cupnb.html + backend/app.py 等）已删除，
+// 工程只剩 App 一条链路，assets/web 就是唯一的页面来源。
+// 以前那个「手动用 frontend/ 覆盖 assets」的任务（pullWebFromFrontend）
+// 也随桌面版一起删掉了 —— 现在没有第二份页面可覆盖。
 // ---------------------------------------------------------------------------
-val frontendDir = layout.projectDirectory.dir("../../frontend").asFile
-val webAssetsDir = layout.projectDirectory.dir("src/main/assets/web").asFile
-
-tasks.register<Copy>("pullWebFromFrontend") {
-    description = "手动把 frontend/ 的网页覆盖到 assets/web（会冲掉手改内容）"
-    group = "syncstage"
-    onlyIf { frontendDir.isDirectory }
-    from(frontendDir) {
-        include("**/*.html", "**/*.css", "**/*.js")
-        include("**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.svg", "**/*.webp", "**/*.gif")
-        // native-bridge.js 是 Android 专属适配层，frontend 里不该有同名文件
-        exclude("native-bridge.js")
-    }
-    into(webAssetsDir)
-}
 
 // 必须在 Chaquopy 收集 Python 源码之前完成同步。
 // 注意：这里不再挂网页同步任务 —— 网页以 assets/web 为准，手改不会被覆盖。

@@ -92,13 +92,14 @@ android/
 ### Python 内核怎么进 APK 的
 
 `app/build.gradle.kts` 里有个 `syncPythonKernel` 任务，构建时把
-`backend/` 下这 5 个文件复制进 `app/src/main/python/`：
+`backend/` 下这 6 个文件复制进 `app/src/main/python/`：
 
 ```
-config.py  pipeline.py  audio_processor.py  video_processor.py  mobile_api.py
+config.py  pipeline.py  audio_processor.py  video_processor.py  mobile_api.py  android_web.py
 ```
 
-桌面壳子（`app.py` / `celery_app.py` / `task.py`）**不会**被打进去。
+这就是 App 的全部 Python 依赖，少一个就 ImportError。
+（桌面壳子 `app.py` / `celery_app.py` / `task.py` 已于 2026-10-21 删除，工程只剩 App 一条链路。）
 `android_entry.py` 是 Android 专属的，手写维护。
 
 ---
@@ -203,7 +204,7 @@ ELF LOAD 段未 16KB 对齐: 无 ✅
 
 ---
 
-## 八、主界面是网页（frontend/cupnb.html）
+## 八、主界面是网页（assets/web/cupnb.html）
 
 App 打开后就是一个 WebView，加载的是：
 
@@ -211,15 +212,9 @@ App 打开后就是一个 WebView，加载的是：
 
 改完直接 `./gradlew :app:assembleDebug` 就会生效。**构建不会覆盖它**。
 
-`frontend/cupnb.html` 是桌面版 Flask 用的同一份页面，和 App 互不影响。
-如果你在桌面版改好了、想把它搬进 App，才需要手动跑一次（会覆盖 assets 里的同名文件）：
-
-```bash
-./gradlew :app:pullWebFromFrontend
-```
-
-> 历史坑：以前构建时会自动把 `frontend/` 复制过来，导致手改 `assets/web/` 的内容
-> 每次都被悄悄冲掉。现在这个同步改成手动任务了。
+> 2026-10-21 起这是全工程**唯一**的页面文件：桌面版 `frontend/cupnb.html`
+> 已随桌面版一起删除，以前那个 `pullWebFromFrontend` 覆盖任务也一并移除了。
+> 想留历史版本，`backup/` 里还有三份 html 备份。
 
 ### 它是怎么跑起来的
 

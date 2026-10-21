@@ -679,6 +679,76 @@ def denoise_audio(
     _write_wav_atomic(output_audio_path, y, sr)
     return output_audio_path
 
+
+def apply_manual_lag(
+    query_audio_path: str,
+    reference_audio_path: str,
+    output_audio_path: str,
+    lag_seconds: float,
+    sr: int = 44100,
+) -> dict:
+    """
+    人工指定延迟对齐：不做任何搜索，直接把 reference 平移 lag_seconds。
+
+    跟 align_audio() 的关系：
+        align_audio 是「猜」——用频谱特征 + 波形相关性找最可能的偏移；
+        本函数是「照办」——用户听出来差多少，就直接按这个数位移。
+
+    符号约定与 align_audio 完全一致（底层都走 _apply_lag）：
+        lag_seconds > 0  → reference 往后推（音乐延后），开头补静音
+        lag_seconds < 0  → reference 往前挪（音乐提前），掐掉开头
+        lag_seconds = 0  → 原样对齐到 0 秒
+
+    返回值字段与 align_audio 保持同构，这样 pipeline 和历史面板
+    不用区分两种来源（confidence 固定为 "manual"）。
+    """
+    if not os.path.isfile(query_audio_path):
+        raise FileNotFoundError(f"query 音频不存在: {query_audio_path}")
+
+    if not os.path.isfile(reference_audio_path):
+        raise FileNotFoundError(f"reference 音频不存在: {reference_audio_path}")
+
+    if sr <= 0:
+        raise ValueError("采样率设置不合法")
+
+    if lag_seconds is None or not np.isfinite(lag_seconds):
+        raise ValueError("人工延迟必须是有限的秒数")
+
+    # 与 align_audio 一样，避免输出路径和输入相同导致写坏源文件。
+    _check_output_path(
+        output_audio_path,
+        query_audio_path,
+        reference_audio_path,
+    )
+
+    # query 只用来取长度：最终音频必须和视频等长。
+    query_y = _load_mono(query_audio_path, sr)
+    ref_y = _load_mono(reference_audio_path, sr)
+
+    lag_samples = int(round(float(lag_seconds) * sr))
+    aligned_y = _apply_lag(ref_y, len(query_y), lag_samples)
+
+    peak = float(np.max(np.abs(aligned_y))) if aligned_y.size else 0.0
+    if peak > 1.0:
+        aligned_y = aligned_y / peak * 0.98
+
+    _write_wav_atomic(output_audio_path, aligned_y, sr)
+
+    return {
+        "output_audio_path": output_audio_path,
+        "lag_samples": lag_samples,
+        "lag_seconds": float(lag_seconds),
+        "coarse_lag_seconds": float(lag_seconds),
+        "refined_lag_seconds": float(lag_seconds),
+        # 不是统计意义上的可信度，只是标明来源，避免 UI 误显示成"低可信"
+        "confidence": "manual",
+        "selection_method": "manual_lag",
+        "manual": True,
+        "warnings": [],
+        "accepted_by_policy": True,
+    }
+
+
 def align_audio(
     query_audio_path: str,
     reference_audio_path: str,

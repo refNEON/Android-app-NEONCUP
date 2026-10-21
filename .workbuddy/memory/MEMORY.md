@@ -8,11 +8,16 @@
 
 ## 文件职责
 
-- `android/app/src/main/assets/web/cupnb.html` —— **App 唯一页面来源**，用户会手改。构建流程不得从 `frontend/` 覆盖它（`syncWebAssets` 已移除，仅留手动任务 `pullWebFromFrontend`）。
-- `frontend/cupnb.html` —— 桌面版 Flask 用的页面，与 App 互不影响。
+> **2026-10-21：桌面版已整体删除。** 工程只剩 App 一条链路。
+> 已删：`backend/app.py`、`celery_app.py`、`task.py`、`start.bat`、`verify_env.py`、
+> `test.py`、`requirements*.txt`、`backend/{uploads,temp,results,reference_audio}/`、
+> 整个 `frontend/`、`.venv/`。**别再想着改 app.py 或 frontend/，它们不存在了。**
+
+- `android/app/src/main/assets/web/cupnb.html` —— **全工程唯一页面文件**，用户会手改。构建不会覆盖 / 同步它。
 - `android/app/src/main/assets/web/native-bridge.js` —— Android 适配层，覆盖 `window.fetch` 转原生调用。改动须保持「分段幂等」，禁止全局提前 return。
-- `backend/` —— Python 内核，构建时由 `syncPythonKernel` 复制到 `android/app/src/main/python/`。
-- `backup/` —— 两份 HTML 备份（当前版 / 原始压缩包版）。
+- `backend/` —— Python 内核，**只有 6 个文件**：`config.py`、`pipeline.py`、`audio_processor.py`、`video_processor.py`、`mobile_api.py`、`android_web.py`，构建时由 `syncPythonKernel` 复制到 `android/app/src/main/python/`（外加手写的 `android_entry.py`）。少一个就 ImportError。
+- `backend/tests/` —— 内核端到端测试，`run_all.py` 一条命令跑 5 项（需 numpy/scipy/soundfile/soxr + 系统 ffmpeg）。
+- `backup/` —— 三份 HTML 备份（当前版 / 原始压缩包版 / 桌面版删除前）+ `desktop-uncommitted-20261021/`（桌面版删除前的未提交补丁与 pip freeze）。
 
 ## 跨语言硬约束
 

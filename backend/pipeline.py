@@ -7,7 +7,7 @@ import tempfile
 import uuid
 
 from config import Config
-from audio_processor import denoise_audio, align_audio
+from audio_processor import denoise_audio, align_audio, apply_manual_lag
 from video_processor import (
     analyze_video,
     extract_audio_from_video,
@@ -105,12 +105,19 @@ def process_video(
     denoise_external=None,
     denoise_query=None,
     reject_low_confidence=None,
+    manual_lag_seconds=None,
 ):
     """
     与运行平台无关的处理入口。
 
     progress_callback 接收一个 dict。
     Android 调用时必须在工作线程中执行本函数。
+
+    manual_lag_seconds:
+        None（默认）= 自动对齐，走频谱+波形搜索。
+        给定数值   = **跳过搜索**，直接按这个秒数平移音乐。
+                     正数 = 音乐延后，负数 = 音乐提前。
+                     用户在界面上填了「手动对齐延迟」时走这条路。
     """
     task_id = _validate_task_id(task_id or uuid.uuid4().hex)
     original_volume = _validate_volume(
@@ -216,17 +223,42 @@ def process_video(
                 os.path.join(workspace, "music_denoised.wav"),
             )
 
-        emit("aligning_audio", 0.60, "正在对齐外部音乐")
-        aligned_path = os.path.join(workspace, "music_aligned.wav")
+        if manual_lag_seconds is None:
+            emit("aligning_audio", 0.60, "正在对齐外部音乐")
+            aligned_path = os.path.join(workspace, "music_aligned.wav")
 
-        alignment = align_audio(
-            query_audio_path=query_path,
-            reference_audio_path=music_for_alignment,
-            output_audio_path=aligned_path,
-            analysis_sr=Config.ANALYSIS_SR,
-            hop_length=Config.HOP_LENGTH,
-            max_shift_seconds=Config.MAX_SHIFT_SECONDS,
-        )
+            alignment = align_audio(
+                query_audio_path=query_path,
+                reference_audio_path=music_for_alignment,
+                output_audio_path=aligned_path,
+                analysis_sr=Config.ANALYSIS_SR,
+                hop_length=Config.HOP_LENGTH,
+                max_shift_seconds=Config.MAX_SHIFT_SECONDS,
+            )
+        else:
+            # 人工延迟：用户已经听出偏差，不再搜索，直接按给定秒数平移。
+            lag_value = float(manual_lag_seconds)
+            if not math.isfinite(lag_value):
+                raise ValueError("手动延迟必须是有限数值")
+            if abs(lag_value) > Config.MAX_SHIFT_SECONDS:
+                raise ValueError(
+                    "手动延迟超出允许范围"
+                    f"（±{Config.MAX_SHIFT_SECONDS:.0f} 秒）"
+                )
+
+            emit(
+                "aligning_audio",
+                0.60,
+                f"正在按人工延迟 {lag_value * 1000:+.0f} ms 对齐",
+            )
+            aligned_path = os.path.join(workspace, "music_aligned.wav")
+
+            alignment = apply_manual_lag(
+                query_audio_path=query_path,
+                reference_audio_path=music_for_alignment,
+                output_audio_path=aligned_path,
+                lag_seconds=lag_value,
+            )
 
         if not isinstance(alignment, dict):
             raise RuntimeError("align_audio() 必须返回 dict")

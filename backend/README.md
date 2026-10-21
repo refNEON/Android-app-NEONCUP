@@ -1,6 +1,15 @@
 # music-game-video-helper
 A application helps to enhance your music game video
 
+> ⚠️ **2026-10-21：桌面版已删除。**
+> `app.py` / `task.py` / `celery_app.py` / `start.bat` / `verify_env.py` /
+> `test.py` / `requirements*.txt` / `frontend/cupnb.html` 都已移出工程，
+> `backend/` 现在只保留供 App 复用的 Python 内核
+> （`config.py`、`pipeline.py`、`audio_processor.py`、`video_processor.py`、
+> `mobile_api.py`、`android_web.py`）。
+> 下面的「安装依赖 / 正常使用」属于历史说明，照做已不可行；
+> App 的构建与使用见 `../android/README.md`，维护要点见根目录 `MAINTENANCE.txt`。
+
 当前项目仍处于早期开发阶段，功能和使用方式可能会持续调整。
 
 ---

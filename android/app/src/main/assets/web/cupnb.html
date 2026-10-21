@@ -1003,94 +1003,6 @@
       }
     }
 
-    /* =========================
-       结果预览弹窗
-    ========================= */
-    .result-modal-mask {
-      position: fixed;
-      inset: 0;
-      z-index: 50;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      background: rgba(2, 5, 16, 0.75);
-      backdrop-filter: blur(16px);
-    }
-
-    .result-modal-mask.show {
-      display: flex;
-    }
-
-    .result-modal {
-      width: min(960px, 100%);
-      max-height: 90vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      border-radius: 28px;
-      background:
-        linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05)),
-        rgba(8, 12, 30, 0.92);
-      border: 1px solid rgba(255,255,255,0.15);
-      box-shadow: 0 34px 100px rgba(0,0,0,0.55);
-    }
-
-    .result-modal-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-      padding: 18px 22px;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-    }
-
-    .result-modal-header h3 {
-      margin: 0;
-      font-size: 18px;
-    }
-
-    .result-modal-body {
-      flex: 1;
-      overflow: auto;
-      padding: 20px 22px;
-    }
-
-    .result-modal-body video {
-      width: 100%;
-      max-height: 60vh;
-      display: block;
-      border-radius: 20px;
-      background: #02040c;
-      border: 1px solid rgba(255,255,255,0.12);
-    }
-
-    .result-modal-footer {
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-      padding: 14px 22px 18px;
-      border-top: 1px solid rgba(255,255,255,0.1);
-    }
-
-    .modal-close-x {
-      width: 36px;
-      height: 36px;
-      border: 0;
-      border-radius: 12px;
-      cursor: pointer;
-      color: #eef3ff;
-      font-size: 22px;
-      line-height: 1;
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.13);
-      transition: 0.2s ease;
-    }
-
-    .modal-close-x:hover {
-      background: rgba(255,255,255,0.16);
-      transform: rotate(5deg);
-    }
   </style>
 </head>
 
@@ -1197,6 +1109,16 @@
               <span class="range-value" id="originalVolumeValue">0.40</span>
             </div>
             <input type="range" id="originalVolume" min="0" max="1" step="0.01" value="0.4" />
+          </div>
+
+          <!--
+            手动对齐延迟：留空 = 自动对齐（原来的行为）。
+            填数字 = 跳过自动搜索，直接按这个毫秒数平移音乐。
+            负数是提前、正数是延后，和后端 _apply_lag 的符号一致。
+          -->
+          <div class="field">
+            <label for="userInput">手动对齐延迟</label>
+            <input type="text" id="userInput" placeholder="请输入延迟时间(-提前/+延后),单位为ms" />
           </div>
 
         <div style="width:100%;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;margin:16px 0 4px;">
@@ -1307,23 +1229,6 @@
   </div>
 
   <div class="toast" id="toast">任务已提交</div>
-
-  <!-- 结果视频预览弹窗 -->
-  <div class="result-modal-mask" id="resultModalMask">
-    <div class="result-modal">
-      <div class="result-modal-header">
-        <h3>处理结果预览</h3>
-        <button class="modal-close-x" id="closeResultModal">&times;</button>
-      </div>
-      <div class="result-modal-body">
-        <video id="resultVideo" controls></video>
-      </div>
-      <div class="result-modal-footer">
-        <a class="btn btn-primary" id="downloadResultBtn" href="#" target="_blank">下载视频</a>
-        <button class="btn btn-ghost" id="closeResultModal2">关闭</button>
-      </div>
-    </div>
-  </div>
 
   <script>
     /* =========================
@@ -1679,6 +1584,9 @@
         formData.append("difficulty", fieldValue("difficulty"));
         formData.append("originalVolume", originalVolume.value);
         formData.append("alignedVolume", alignedVolume.value);
+        // 手动对齐延迟（毫秒）。留空 = 自动对齐。
+        // 字段名 manualDelay 要和 Kotlin 侧 runTask 取的一致。
+        formData.append("manualDelay", fieldValue("userInput").trim());
         formData.append("remark", fieldValue("remark"));
 
         showToast("正在上传...");
