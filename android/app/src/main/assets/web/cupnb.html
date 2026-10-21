@@ -86,6 +86,13 @@
     }
 
     .page {
+      a:link {
+            color: #F0CDC7;
+            text-decoration: none; /* 去掉下划线，可选 */
+      }
+      a:visited {
+            color: #A89191;
+      }
       position: relative;
       z-index: 1;
       min-height: 100vh;
@@ -98,7 +105,7 @@
     }
 
     .brand {
-      display: inline-flex;
+      display: flex;
       align-items: center;
       gap: 12px;
       padding: 10px 16px;
@@ -135,7 +142,7 @@
       min-height: 306px;
       margin-top: 22px;
       border-radius: 34px;
-      overflow: hidden;
+      overflow: visible;
       border: 1px solid rgba(255, 255, 255, 0.13);
       background:
         radial-gradient(circle at 18% 26%, rgba(85, 219, 255, 0.16), transparent 25%),
@@ -149,6 +156,7 @@
       content: "";
       position: absolute;
       inset: 0;
+      border-radius: inherit;
       background:
         linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent),
         repeating-linear-gradient(
@@ -229,13 +237,14 @@
     ========================= */
 
     /*
-      .hero 是 overflow:hidden，所以这里的 top / 各层 top 不能是负数：
-      一旦超出 .hero 的上边界，超出部分会被直接裁掉（既看不见、也点不到）。
-      下面这套数值保证 pin 和挂绳都完整落在卡片内，同时海报基本贴着卡片顶边。
+      整套（pin + 挂绳 + 海报）都用 .poster-area 的 top 做整体升降。
+      .hero 已经是 overflow:visible，所以这里的负值不会被裁掉。
+      各层的相对关系要保持：pin 底边(22) < 挂绳底边(35) ≈ 海报顶边(34)，
+      这样挂绳才会恰好塞进海报下面，looks "挂着"；海报顶边比 pin 底边低 12px 最好看。
     */
     .poster-area {
       position: absolute;
-      top: 0;
+      top: -30px;
       left: 50%;
       width: 460px;
       height: 174px;
@@ -286,7 +295,7 @@
 
     .hanging-poster {
       position: absolute;
-      top: 24px;
+      top: 34px;
       left: 50%;
       width: 420px;
       height: 100px;
@@ -991,7 +1000,11 @@
       }
 
       .poster-area {
-        top: 10px;
+        /* 跟桌面保持同一套垂直关系：origin 改成上边中点，
+           否则 scale(0.74) 会绕中心缩放、把整块往下推约 22px，
+           看起来像"手机上又掉回去了"。 */
+        top: -8px;
+        transform-origin: top center;
         transform: translateX(-50%) scale(0.74);
       }
 
@@ -1026,11 +1039,13 @@
 
   <div class="page">
     <header class="container">
-      <div class="brand">
-        <span class="brand-dot"></span>
-        <strong>v0.3</strong>
-        <span>关注不是杯子喵~</span>
-      </div>
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <strong>v0.31</strong>
+            <div>
+                <a href="https://space.bilibili.com/3493297993550585">关注杯子喵</a>
+                <a href="https://space.bilibili.com/333454038">关注NEθN捏</a></div>
+        </div>
 
       <section class="hero">
         <!-- 顶部海报挂图 -->
@@ -1235,7 +1250,7 @@
     </main>
 
     <div class="container footer-note">
-      测试版v0.3
+      测试版v0.31
     </div>
   </div>
 

@@ -5,4 +5,11 @@
     <color name="teal_200">#FF03DAC5</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!--
+        系统栏（状态栏 / 底部导航栏）和窗口底色。
+        取值和网页 :root 里的 bg1 (#060914) 对齐，
+        这样状态栏、顶栏、网页背景是同一块深色，不会有白边。
+    -->
+    <color name="page_bg">#FF060914</color>
 </resources>

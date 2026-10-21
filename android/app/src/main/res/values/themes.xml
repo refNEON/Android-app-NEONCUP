@@ -5,8 +5,23 @@
         <item name="colorPrimary">@color/purple_500</item>
         <item name="colorPrimaryVariant">@color/purple_700</item>
         <item name="colorSecondary">@color/teal_200</item>
-        <item name="android:statusBarColor" tools:targetApi="l">@color/purple_700</item>
+
+        <!--
+            系统栏统一压成网页的深色，避免出现白条。
+            四点一起改才完整：
+            1) windowBackground —— 窗口底色。Android 15(targetSdk 35) 起系统强制
+               edge-to-edge，statusBarColor 会被忽略、状态栏变透明，这时"透出来"的
+               就是窗口底色。不设它，浅色主题下就是白的。
+            2) statusBarColor —— API 21~34 的状态栏颜色。
+            3) navigationBarColor —— 底部导航栏，同样会白。
+            4) windowLightStatusBar / windowLightNavigationBar = false
+               —— 让图标用浅色（白），配深底才看得清；设 true 是深色图标，配白底用。
+        -->
+        <item name="android:windowBackground">@color/page_bg</item>
+        <item name="android:statusBarColor" tools:targetApi="l">@color/page_bg</item>
+        <item name="android:navigationBarColor" tools:targetApi="l">@color/page_bg</item>
         <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">false</item>
     </style>
 
     <style name="SectionLabel" parent="TextAppearance.MaterialComponents.Subtitle2">

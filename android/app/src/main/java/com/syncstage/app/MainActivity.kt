@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Message
 import android.provider.MediaStore
 import android.util.Log
 import android.util.TypedValue
@@ -65,6 +66,15 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "SyncStage"
         private const val PAGE_URL = "file:///android_asset/web/cupnb.html"
+
+        /**
+         * 这些协议的链接必须留在 WebView 里，不能往外丢：
+         *   file        页面自己（assets / debug_web）
+         *   about/data  页面内部页面
+         *   blob        页面生成的视频/音频临时地址
+         *   javascript  页面里的 javascript: 伪链接
+         */
+        private val INTERNAL_SCHEMES = setOf("file", "about", "data", "blob", "javascript")
     }
 
     private lateinit var webView: WebView
@@ -81,6 +91,13 @@ class MainActivity : AppCompatActivity() {
     // ---- 网页里的 file input 走这里 ----
     private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingFileKind: String? = null
+
+    /**
+     * 处理 target="_blank" 链接时用的临时 WebView（探针）。
+     * 它不会被挂到界面上，只负责把地址接住然后交给系统浏览器；
+     * 每接一次就把上一个销毁，避免攒着泄漏。
+     */
+    private var externalWindowProbe: WebView? = null
 
     // 选完文件后在后台复制到缓存，真正的路径给 Python 用
     private var videoSource: Deferred<String?>? = null
@@ -237,8 +254,64 @@ class MainActivity : AppCompatActivity() {
                     true
                 }.getOrDefault(false)
             }
+
+            /**
+             * 页面里 target="_blank" 或 window.open() 的链接**不会**走 shouldOverrideUrlLoading，
+             * 而是走到这里。这里不开新窗口，只把地址接住后交给系统浏览器，
+             * 否则 WebView 找不到新窗口，点了就是没反应。
+             */
+            override fun onCreateWindow(
+                view: WebView?,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message?,
+            ): Boolean {
+                val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+
+                externalWindowProbe?.destroy()
+                val probe = WebView(this@MainActivity)
+                externalWindowProbe = probe
+                probe.webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(
+                        w: WebView?,
+                        request: WebResourceRequest?,
+                    ): Boolean {
+                        // 永远返回 true：新窗口只做转发，不做任何加载
+                        handleNavigation(request?.url?.toString())
+                        return true
+                    }
+                }
+                transport.webView = probe
+                resultMsg.sendToTarget()
+                return true
+            }
         }
         webView.webViewClient = object : WebViewClient() {
+
+            /**
+             * 站外超链接一律交给系统浏览器打开，App 自己不做站内跳转。
+             *
+             * 只有两类留在 WebView 里：
+             *   1. file:// 等页面内部协议（见 INTERNAL_SCHEMES）；
+             *   2. 127.0.0.1 / localhost —— Python 内核的 /results/ 视频流走 Range 请求，
+             *      一旦被外部浏览器接管，<video> 的播放和「存到影片」都会断掉。
+             */
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?,
+            ): Boolean {
+                val req = request ?: return false
+                // 子框架（iframe）不动，只管主框架的导航
+                if (!req.isForMainFrame) return false
+                return handleNavigation(req.url?.toString())
+            }
+
+            // API 24+ 系统只回调上面那个 WebResourceRequest 版本，
+            // 这个字符串版本留给个别定制 ROM 的旧通道，逻辑完全一致。
+            @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                return handleNavigation(url)
+            }
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
                 // 尽早注入：页面里的脚本在解析阶段就可能发请求。
@@ -270,6 +343,61 @@ class MainActivity : AppCompatActivity() {
         }
 
         startEngineAndLoad()
+    }
+
+    // ---------------- 链接跳转策略 ----------------
+
+    /**
+     * 决定一个链接是「留在 WebView」还是「交给系统」。
+     *
+     * @return true  = 已接管，WebView 不要加载它
+     *         false = 留在 WebView 里加载
+     */
+    private fun handleNavigation(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+        val scheme = uri.scheme?.lowercase() ?: return false
+
+        // 1) 页面自身 / 页面内部机制：留在 WebView
+        if (scheme in INTERNAL_SCHEMES) return false
+
+        // 2) 本地内核服务（视频流、Range 请求）：留在 WebView，丢了就放不了视频
+        val host = uri.host?.lowercase().orEmpty()
+        if (host == "127.0.0.1" || host == "localhost") return false
+
+        // 3) 其余全部交给系统：http(s) 会被浏览器接，mailto/tel/intent 由系统匹配
+        return openExternally(url)
+    }
+
+    /**
+     * 用系统能力打开链接。优先浏览器（http/https 只有浏览器认），
+     * 没有可用应用时给个提示，避免「点了没反应」。
+     */
+    private fun openExternally(url: String): Boolean {
+        val intent = runCatching {
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                // 从 App 内部拨给外部应用，必须带 NEW_TASK
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }.getOrNull()
+
+        if (intent == null || intent.resolveActivity(packageManager) == null) {
+            Log.w(TAG, "没有 App 能处理该链接: $url")
+            toast("没有可用的浏览器打开这个链接")
+            return true   // 已接管，别让 WebView 再加载一遍再报错
+        }
+
+        return runCatching {
+            startActivity(intent)
+            Log.i(TAG, "已交给系统打开: $url")
+            true
+        }.getOrElse {
+            Log.e(TAG, "打开外部链接失败: $url", it)
+            toast("打开链接失败")
+            true
+        }
     }
 
     // ---------------- 启动内核 + 加载页面 ----------------
