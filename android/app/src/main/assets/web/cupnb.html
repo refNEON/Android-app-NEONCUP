@@ -228,9 +228,14 @@
        HANGING POSTER
     ========================= */
 
+    /*
+      .hero 是 overflow:hidden，所以这里的 top / 各层 top 不能是负数：
+      一旦超出 .hero 的上边界，超出部分会被直接裁掉（既看不见、也点不到）。
+      下面这套数值保证 pin 和挂绳都完整落在卡片内，同时海报基本贴着卡片顶边。
+    */
     .poster-area {
       position: absolute;
-      top: 12px;
+      top: 0;
       left: 50%;
       width: 460px;
       height: 174px;
@@ -263,7 +268,7 @@
 
     .poster-string {
       position: absolute;
-      top: 12px;
+      top: 4px;
       width: 2px;
       height: 31px;
       background: linear-gradient(to bottom, rgba(240,246,255,0.8), rgba(240,246,255,0.25));
@@ -281,16 +286,18 @@
 
     .hanging-poster {
       position: absolute;
-      top: 32px;
+      top: 24px;
       left: 50%;
       width: 420px;
-      height: 116px;
+      height: 100px;
       transform: translateX(-50%);
       transform-origin: top center;
       border-radius: 22px 22px 24px 24px;
       overflow: hidden;
       cursor: grab;
       pointer-events: auto;
+      /* 手机上必须声明，否则竖向拖动会被浏览器当成页面滚动，直接 pointercancel */
+      touch-action: none;
       user-select: none;
       border: 1px solid rgba(255,255,255,0.22);
       background: rgba(255,255,255,0.08);
@@ -1002,7 +1009,15 @@
         flex-wrap: wrap;
       }
     }
+    .field input {
+    background: transparent;
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+  }
 
+  .field input::placeholder {
+    color: rgba(255, 255, 255, 0.65);
+  }
   </style>
 </head>
 
@@ -1117,13 +1132,9 @@
             负数是提前、正数是延后，和后端 _apply_lag 的符号一致。
           -->
           <div class="field">
-            <label for="userInput">手动对齐延迟</label>
+            <label for="userInput">手动对齐延迟(-提前/+延后,单位为ms)</label>
             <input type="text" id="userInput" placeholder="请输入延迟时间(-提前/+延后),单位为ms" />
           </div>
-
-        <div style="width:100%;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;margin:16px 0 4px;">
-          <div id="progressBar" style="width:0%;height:100%;background:linear-gradient(90deg,var(--primary2),var(--primary));border-radius:3px;transition:width 0.4s ease;"></div>
-        </div>
 
         <div class="action-row">
           <button class="btn btn-primary" id="submitBtn">提交任务</button>
@@ -1275,7 +1286,13 @@
 
     const submitBtn = document.getElementById("submitBtn");
     const fillDemoBtn = document.getElementById("fillDemoBtn");
-    const progressBar = document.getElementById("progressBar");
+    /*
+      进度条那段 HTML 已经删掉了，getElementById 会返回 null，
+      后面 progressBar.style.width = ... 一赋值就抛 TypeError，
+      提交按钮的 try 直接跳到 catch，表现就是"点提交没反应/提交失败"。
+      给个空壳兜底：有进度条就照常动，没有就是个无害的占位。
+    */
+    const progressBar = document.getElementById("progressBar") || { style: {} };
     const toast = document.getElementById("toast");
 
     const posterImg = document.getElementById("posterImg");
@@ -1683,28 +1700,40 @@
     const closeResultModal = document.getElementById("closeResultModal");
     const closeResultModal2 = document.getElementById("closeResultModal2");
 
+    /*
+      预览弹窗的 HTML 已经被删掉了，这里取到的全是 null。
+      下面曾经直接 closeResultModal.addEventListener(...)，
+      在加载阶段就抛 TypeError，**整段 <script> 就此中断**：
+      后面的「海报拖拽」根本注册不上，看起来就像"拖不动了"。
+      所以这里全部判空——弹窗不存在时，相关函数变成空操作。
+    */
     function openResultModal(videoUrl) {
+      if (!resultModalMask || !resultVideo) return;
       resultVideo.src = videoUrl;
       resultVideo.load();
-      downloadResultBtn.href = videoUrl;
+      if (downloadResultBtn) downloadResultBtn.href = videoUrl;
       resultModalMask.classList.add("show");
     }
 
     function hideResultModal() {
+      if (!resultModalMask || !resultVideo) return;
       resultModalMask.classList.remove("show");
       resultVideo.pause();
     }
 
-    closeResultModal.addEventListener("click", hideResultModal);
-    closeResultModal2.addEventListener("click", hideResultModal);
+    if (closeResultModal) closeResultModal.addEventListener("click", hideResultModal);
+    if (closeResultModal2) closeResultModal2.addEventListener("click", hideResultModal);
 
-    resultModalMask.addEventListener("click", (e) => {
-      if (e.target === resultModalMask) {
-        hideResultModal();
-      }
-    });
+    if (resultModalMask) {
+      resultModalMask.addEventListener("click", (e) => {
+        if (e.target === resultModalMask) {
+          hideResultModal();
+        }
+      });
+    }
 
     window.addEventListener("keydown", (e) => {
+      if (!resultModalMask) return;
       if (e.key === "Escape" && resultModalMask.classList.contains("show")) {
         hideResultModal();
       }
