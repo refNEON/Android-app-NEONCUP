@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">SyncStage</string>
+    <string name="app_name">Sync-NEONCUP</string>
     <string name="app_subtitle">音游手元 · 音乐对齐与混音</string>
 
     <string name="section_input">素材</string>
@@ -34,5 +34,5 @@
     <string name="cancel">取消</string>
 
     <string name="status_idle">等待开始</string>
-    <string name="tip_no_network">提示：手机端不支持按歌名联网搜歌，请选择本地音乐文件。</string>
+    <string name="tip_no_network">请选择本地音乐文件。</string>
 </resources>
