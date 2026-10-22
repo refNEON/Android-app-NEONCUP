@@ -15,7 +15,7 @@
 
 - `android/app/src/main/assets/web/cupnb.html` —— **全工程唯一页面文件**，用户会手改。构建不会覆盖 / 同步它。
 - `android/app/src/main/assets/web/native-bridge.js` —— Android 适配层，覆盖 `window.fetch` 转原生调用。改动须保持「分段幂等」，禁止全局提前 return。
-- `backend/` —— Python 内核，**只有 6 个文件**：`config.py`、`pipeline.py`、`audio_processor.py`、`video_processor.py`、`mobile_api.py`、`android_web.py`，构建时由 `syncPythonKernel` 复制到 `android/app/src/main/python/`（外加手写的 `android_entry.py`）。少一个就 ImportError。
+- `backend/` —— Python 内核，**只有 7 个文件**：`config.py`、`pipeline.py`、`audio_processor.py`、`video_processor.py`、`mobile_api.py`、`audio_waveform.py`、`android_web.py`，构建时由 `syncPythonKernel` 复制到 `android/app/src/main/python/`（外加手写的 `android_entry.py`）。**新增内核文件必须同步改 `build.gradle.kts` 的 `kernelFiles`**，否则不会被打进 APK，运行时报 ImportError。
 - `backend/tests/` —— 内核端到端测试，`run_all.py` 一条命令跑 5 项（需 numpy/scipy/soundfile/soxr + 系统 ffmpeg）。
 - `backup/` —— 三份 HTML 备份（当前版 / 原始压缩包版 / 桌面版删除前）+ `desktop-uncommitted-20261021/`（桌面版删除前的未提交补丁与 pip freeze）。
 - **App 图标（2026-10-21 重做）**：`res/drawable/neoncup_background.xml`（深夜蓝径向渐变，自适应背景层）+ `res/mipmap-*/neoncup_foreground.webp`（透明底霓虹杯，5 密度）+ `res/mipmap-anydpi-v26/neoncup{,_round}.xml`（自适应图标）+ `res/mipmap-*/neoncup{,_round}.webp`（API<26 回落）。manifest 必须写 `@mipmap/neoncup` / `@mipmap/neoncup_round`，**别直接指 foreground**。`<adaptive-icon>` 只能放 `mipmap-anydpi-v26/`，放 `drawable/` 会 aapt2 报 "requires a sdk version of at least 26"。

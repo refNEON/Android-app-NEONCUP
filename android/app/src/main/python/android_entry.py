@@ -19,6 +19,7 @@ Kotlin 侧唯一需要认识的 Python 模块。
 import json
 
 import android_web
+import audio_waveform
 import mobile_api
 
 # 供 Kotlin 侧查询：确认 Python 内核确实被打包进来了。
@@ -126,3 +127,51 @@ def start(
         progress_callback=progress_callback,
         manual_lag_ms=manual_lag_ms,
     )
+
+
+def analyze_waveform(
+    video_path,
+    music_path,
+    manual_lag_ms=None,
+    work_dir=None,
+    points=1800,
+):
+    """
+    给页面画「延迟对比波形」用。
+
+    抽两条音轨 -> 各压成 points 个峰值 -> 带上延迟量返回。
+    延迟来源与正式任务一致：
+        manual_lag_ms 有值 -> 直接用
+        空                -> 跑一次自动对齐
+
+    注意：自动对齐这条路会把 align_audio 完整跑一遍，
+    耗时和正式处理的对齐阶段相当（几十秒），调用方要给等待提示。
+
+    返回 JSON 字符串（跨语言边界最稳），失败时 shape 与 mobile_api 一致：
+        {"status": "error", "error": ..., "error_type": ...}
+    """
+    import traceback
+
+    try:
+        result = audio_waveform.analyze(
+            video_path=str(video_path),
+            music_path=str(music_path) if music_path else None,
+            manual_lag_ms=manual_lag_ms,
+            work_dir=str(work_dir) if work_dir else None,
+            points=points,
+        )
+        return json.dumps(
+            mobile_api._json_safe(result),
+            ensure_ascii=False,
+            default=str,
+        )
+    except Exception as exc:  # noqa: BLE001 - 统一转成可读错误回给页面
+        traceback.print_exc()
+        return json.dumps(
+            {
+                "status": "error",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+            ensure_ascii=False,
+        )

@@ -16,6 +16,7 @@ val kernelFiles = listOf(
     "audio_processor.py",
     "video_processor.py",
     "mobile_api.py",
+    "audio_waveform.py",  // 延迟可视化的波形包络（只产数据，不画图）
     "android_web.py",   // WebView 用的本地静态服务
 )
 

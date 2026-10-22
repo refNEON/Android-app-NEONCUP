@@ -2,7 +2,12 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- 禁止整页缩放：user-scalable 单独写在新版 WebView 上可能被忽略，
+       必须同时给 maximum-scale=1.0 才稳。页面内部的 canvas 缩放不受影响。 -->
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no"
+  />
   <title>关注杯子喵 - 关注杯子谢谢喵~</title>
 
   <style>
@@ -359,7 +364,7 @@
     }
 
     .poster-fallback::before {
-      content: "测试版";
+      content: "正式版";
       position: absolute;
       left: 26px;
       bottom: 28px;
@@ -965,6 +970,218 @@
       opacity: 1;
     }
 
+    /* =========================
+       延迟波形弹窗
+       数据来自 Python 的 audio_waveform.analyze：
+       两条包络 + 一个延迟量，画布由前端自己画（不传 PNG）
+       ========================= */
+    .wave-mask {
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(3, 6, 16, 0.74);
+      backdrop-filter: blur(6px);
+      opacity: 0;
+      visibility: hidden;
+      transition: 0.24s ease;
+    }
+
+    .wave-mask.show {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .wave-modal {
+      width: min(880px, 100%);
+      max-height: 92vh;
+      overflow: auto;
+      padding: 16px 16px 12px;
+      border-radius: 22px;
+      color: var(--text);
+      background: linear-gradient(160deg, #0e1730, #0a0f22 58%, #060913);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .wave-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .wave-head h3 {
+      flex: 1;
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .wave-close {
+      width: 30px;
+      height: 30px;
+      border: 0;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    /* 右上角延迟：原本是只读 pill，现在改成可编辑输入框（单位 ms） */
+    .wave-lag-field {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .wave-lag-field:focus-within {
+      border-color: rgba(124, 92, 255, 0.8);
+      background: rgba(124, 92, 255, 0.16);
+    }
+
+    #waveLagInput {
+      width: 62px;
+      padding: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: #dbe7ff;
+      font-family: inherit;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      cursor: text;
+      /* 虚线底边提示这里可以直接改 */
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.24);
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    #waveLagInput:focus {
+      border-bottom-color: rgba(201, 184, 255, 0.85);
+    }
+
+    #waveLagInput:disabled {
+      color: rgba(219, 231, 255, 0.5);
+    }
+
+    .wave-lag-unit {
+      font-size: 11px;
+      line-height: 1;
+      color: var(--muted);
+    }
+
+    .wave-canvas-wrap {
+      padding: 6px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    #waveCanvas {
+      display: block;
+      width: 100%;
+      cursor: grab;
+      /* 手机单指拖动/双指捏合不要被页面滚动吃掉 */
+      touch-action: none;
+    }
+
+    #waveCanvas.dragging {
+      cursor: grabbing;
+    }
+
+    .wave-tools {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .wave-tool {
+      min-width: 30px;
+      height: 28px;
+      padding: 0 10px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 9px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .wave-tool:active {
+      transform: scale(0.96);
+    }
+
+    .wave-tool:disabled {
+      opacity: 0.38;
+      transform: none;
+      cursor: default;
+    }
+
+    .wave-scale {
+      min-width: 44px;
+      color: #c9b8ff;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .wave-note {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #7fd0ff;
+    }
+
+    .wave-tip {
+      margin-left: auto;
+      margin-right: auto;
+      opacity: 0.75;
+    }
+
+    .wave-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .wave-legend i {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      margin-right: 6px;
+      border-radius: 50%;
+    }
+
+    .wave-meta {
+      margin-top: 6px;
+      font-size: 12px;
+      line-height: 1.7;
+      color: var(--muted);
+    }
+
+    .wave-hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #ffd27a;
+    }
+
     .footer-note {
       margin-top: 18px;
       color: rgba(220,230,255,0.6);
@@ -1041,7 +1258,7 @@
     <header class="container">
         <div class="brand">
             <span class="brand-dot"></span>
-            <strong>v0.31</strong>
+            <strong>v1.0</strong>
             <div>
                 <a href="https://space.bilibili.com/3493297993550585">关注杯子喵</a>
                 <a href="https://space.bilibili.com/333454038">关注NEθN捏</a></div>
@@ -1153,7 +1370,8 @@
 
         <div class="action-row">
           <button class="btn btn-primary" id="submitBtn">提交任务</button>
-          <span class="pill">✨ Prototype UI v1</span>
+          <button class="btn btn-ghost" id="waveBtn">延迟波形</button>
+          <span class="pill">✨ Prototype UI v2</span>
         </div>
 
       
@@ -1250,11 +1468,51 @@
     </main>
 
     <div class="container footer-note">
-      测试版v0.31
+      正式版v1.0
     </div>
   </div>
 
   <div class="toast" id="toast">任务已提交</div>
+
+  <!-- 延迟波形弹窗：由"延迟波形"按钮触发，数据来自原生 analyzeWaveform 回调 -->
+  <div class="wave-mask" id="waveMask">
+    <div class="wave-modal">
+      <div class="wave-head">
+        <h3>延迟对齐检查</h3>
+        <label class="wave-lag-field" for="waveLagInput" title="可直接输入毫秒数，回车确认">
+          <input
+            id="waveLagInput"
+            type="text"
+            inputmode="decimal"
+            autocomplete="off"
+            spellcheck="false"
+            value="—"
+            disabled
+          />
+          <span class="wave-lag-unit">ms</span>
+        </label>
+        <button class="wave-close" id="waveClose" aria-label="关闭">✕</button>
+      </div>
+      <div class="wave-canvas-wrap">
+        <canvas id="waveCanvas"></canvas>
+      </div>
+      <div class="wave-tools">
+        <button class="wave-tool" id="waveLagMinus" aria-label="延迟减少 100 毫秒" disabled>−100ms</button>
+        <button class="wave-tool" id="waveLagPlus" aria-label="延迟增加 100 毫秒" disabled>+100ms</button>
+        <button class="wave-tool" id="waveZoomReset">全览</button>
+        <span class="wave-scale" id="waveScale">全览</span>
+        <span class="wave-tip"> 双指缩放 · 拖动平移 · 双击复位</span>
+      </div>
+      <div class="wave-note" id="waveNote" style="display:none"></div>
+      <div class="wave-legend">
+        <span><i style="background:#55dbff"></i>视频音轨</span>
+        <span><i style="background:#ff7ad9"></i>参考音乐（已按延迟错开）</span>
+        <span><i style="background:#7c5cff"></i>延迟量</span>
+      </div>
+      <div class="wave-meta" id="waveMeta">—</div>
+      <div class="wave-hint" id="waveHint" style="display:none"></div>
+    </div>
+  </div>
 
   <script>
     /* =========================
@@ -1765,6 +2023,760 @@
       console.log("任务完成，结果视频：", fullUrl);
       openResultModal(fullUrl);
     }
+
+    /* =========================
+       延迟波形弹窗
+
+       数据链路：
+         按钮 -> SyncStage.analyzeWaveform()
+              -> Python audio_waveform.analyze()（抽音轨 + 算包络 + 定延迟）
+              -> 回调 window.__syncStageWaveform(json)
+              -> 这里用 canvas 画两条错开的波形
+
+       ⚠️ 这段在 script 中段执行，任何一处抛错都会让后面的
+       海报拖拽装不上，所以每个 DOM 访问都判空、每个外部调用都 try。
+    ========================= */
+    const waveMask = document.getElementById("waveMask");
+    const waveCanvas = document.getElementById("waveCanvas");
+    const waveBtn = document.getElementById("waveBtn");
+    const waveClose = document.getElementById("waveClose");
+    const waveLagInput = document.getElementById("waveLagInput");
+    const waveLagMinus = document.getElementById("waveLagMinus");
+    const waveLagPlus = document.getElementById("waveLagPlus");
+    const waveNote = document.getElementById("waveNote");
+    const waveMeta = document.getElementById("waveMeta");
+    const waveHint = document.getElementById("waveHint");
+
+    let waveBusy = false;
+    let waveWaiter = null;
+
+    /* 原生分析完成后回调这里（MainActivity 拼出来的 JS） */
+    window.__syncStageWaveform = function (jsonText) {
+      const waiter = waveWaiter;
+      waveWaiter = null;
+      if (!waiter) return;
+
+      let data;
+      try {
+        data = JSON.parse(jsonText);
+      } catch (e) {
+        waiter.reject(new Error("分析结果解析失败"));
+        return;
+      }
+      if (data.status !== "success") {
+        waiter.reject(new Error(data.error || "分析失败"));
+        return;
+      }
+      waiter.resolve(data);
+    };
+
+    function requestWaveform(manualDelay) {
+      return new Promise((resolve, reject) => {
+        const api = window.SyncStage;
+        if (!api || typeof api.analyzeWaveform !== "function") {
+          reject(new Error("当前环境不支持，请在 App 内使用"));
+          return;
+        }
+
+        let settled = false;
+        let timer = null;
+
+        const finish = (fn, arg) => {
+          if (settled) return;
+          settled = true;
+          waveWaiter = null;
+          if (timer) clearTimeout(timer);
+          fn(arg);
+        };
+
+        // 自动对齐要完整跑一遍对齐算法，给足时间（3 分钟）
+        timer = setTimeout(
+          () => finish(reject, new Error("分析超时，请重试")),
+          180000
+        );
+
+        waveWaiter = {
+          resolve: (d) => finish(resolve, d),
+          reject: (e) => finish(reject, e),
+        };
+
+        try {
+          api.analyzeWaveform(JSON.stringify({ manualDelay: manualDelay || "" }));
+        } catch (e) {
+          finish(reject, e);
+        }
+      });
+    }
+
+    /* 画图：横轴是时间，音乐按 lag 整体错开，两条波形共享同一刻度 */
+    let lastWaveData = null;
+
+    /* 画图：横轴是时间，音乐按 lag 整体错开，两条波形共享同一刻度。
+       视窗（waveView）决定画哪一段，缩放/平移只改视窗，数据本身不动。 */
+    const WAVE_MAX_ZOOM = 40;   // 最多放大到全览的 1/40
+
+    /* 窗口内的延迟微调：加减按钮每次 WAVE_LAG_STEP 毫秒，
+       范围与后端 Config.MAX_SHIFT_SECONDS（60s）保持一致。 */
+    const WAVE_LAG_STEP = 100;
+    const WAVE_LAG_LIMIT = 60000;
+
+    let waveLagMs = 0;          // 当前窗口使用的延迟（毫秒，带符号）
+    let waveLagEdited = false;  // 用户是否在窗口里手动调过
+
+    const waveView = {
+      t0: 0,
+      t1: 1,
+      full0: 0,
+      full1: 1,
+      geom: null,   // 上次绘制的几何参数，手势换算「像素 <-> 秒」要用
+    };
+
+    const waveScale = document.getElementById("waveScale");
+    const waveZoomReset = document.getElementById("waveZoomReset");
+
+    function clampNum(v, lo, hi) {
+      return v < lo ? lo : v > hi ? hi : v;
+    }
+
+    function waveSpan() {
+      return Math.max(1e-6, waveView.t1 - waveView.t0);
+    }
+
+    function waveFullSpan() {
+      return Math.max(1e-6, waveView.full1 - waveView.full0);
+    }
+
+    function updateWaveScale() {
+      if (!waveScale) return;
+      const z = waveFullSpan() / waveSpan();
+      const txt = z < 1.05 ? "全览" : z.toFixed(1) + "×";
+      // 拖动时每帧都会走到这里，值没变就别碰 DOM
+      if (waveScale.textContent !== txt) waveScale.textContent = txt;
+    }
+
+    /* 设视窗：跨度夹在 [全览/40, 全览]，起点不许跑出数据范围 */
+    function setWaveWindow(t0, span) {
+      const full = waveFullSpan();
+      const s = clampNum(span, full / WAVE_MAX_ZOOM, full);
+      const start = clampNum(t0, waveView.full0, waveView.full1 - s);
+      waveView.t0 = start;
+      waveView.t1 = start + s;
+      updateWaveScale();
+    }
+
+    function resetWaveView() {
+      setWaveWindow(waveView.full0, waveFullSpan());
+      renderWave();
+    }
+
+    /* anchorFrac：0~1，缩放时保持不动的那个横向位置（相对绘图区） */
+    function zoomWave(factor, anchorFrac) {
+      const frac = clampNum(anchorFrac, 0, 1);
+      const span = waveSpan();
+      const anchorT = waveView.t0 + span * frac;
+      const next = clampNum(
+        span / factor,
+        waveFullSpan() / WAVE_MAX_ZOOM,
+        waveFullSpan()
+      );
+      setWaveWindow(anchorT - next * frac, next);
+      renderWave();
+    }
+
+    function panWaveBy(dt) {
+      setWaveWindow(waveView.t0 + dt, waveSpan());
+      renderWave();
+    }
+
+    /* ---------- 延迟调整（右上角输入框 + 加减按钮） ---------- */
+
+    function formatWaveLag(ms) {
+      return (ms > 0 ? "+" : "") + ms;
+    }
+
+    /* 把内部状态写回输入框；正在输入时不要调，否则光标会被顶掉 */
+    function updateWaveLagInput() {
+      if (!waveLagInput || !lastWaveData) return;
+      const txt = formatWaveLag(waveLagMs);
+      if (waveLagInput.value !== txt) waveLagInput.value = txt;
+    }
+
+    /* 没数据时输入框和按钮都是禁用的，避免改出一个不存在的延迟 */
+    function setWaveLagControls(enabled) {
+      if (waveLagInput) {
+        waveLagInput.disabled = !enabled;
+        if (!enabled) waveLagInput.value = "—";
+      }
+      if (waveLagMinus) waveLagMinus.disabled = !enabled;
+      if (waveLagPlus) waveLagPlus.disabled = !enabled;
+    }
+
+    /* 延迟变了 -> 数据范围也跟着变（音乐从 lag 起画），视窗重新夹一次。
+       全览状态就重新全览；放大状态保住缩放位置，只把越界的部分夹回来。 */
+    function refreshWaveLagView() {
+      const d = lastWaveData;
+      if (!d) return;
+
+      const lag = waveLagMs / 1000;
+      const vDur = Number(d.video && d.video.duration) || 0;
+      const mDur = Number(d.music && d.music.duration) || 0;
+
+      const wasFull = waveFullSpan() - waveSpan() < 1e-3;
+
+      waveView.full0 = Math.min(0, lag);
+      waveView.full1 = Math.max(vDur, lag + mDur, 0.001);
+
+      if (wasFull) {
+        waveView.t0 = waveView.full0;
+        waveView.t1 = waveView.full1;
+        updateWaveScale();
+      } else {
+        setWaveWindow(waveView.t0, waveSpan());
+      }
+    }
+
+    function updateWaveMetaText() {
+      const d = lastWaveData;
+      if (!d) return;
+
+      const vDur = Number(d.video && d.video.duration) || 0;
+      const mDur = Number(d.music && d.music.duration) || 0;
+
+      const parts = [
+        "视频 " + vDur.toFixed(2) + "s",
+        "音乐 " + mDur.toFixed(2) + "s",
+      ];
+      if (waveLagEdited) {
+        parts.push("窗口内调整延迟");
+      } else {
+        parts.push(d.lag_source === "manual" ? "使用手填延迟" : "自动对齐");
+        if (d.confidence && d.confidence !== "manual") {
+          parts.push("可信度 " + d.confidence);
+        }
+      }
+      if (waveMeta) waveMeta.textContent = parts.join(" · ");
+
+      if (waveNote) {
+        if (waveLagEdited) {
+          waveNote.style.display = "block";
+          waveNote.textContent =
+            "已同步到表单「手动对齐延迟」：" +
+            formatWaveLag(waveLagMs) +
+            " ms，提交任务时按此延迟对齐";
+        } else {
+          waveNote.style.display = "none";
+        }
+      }
+    }
+
+    /* 表单里那一栏才是真正影响出片的参数，窗口调完要回写 */
+    function syncManualDelayInput() {
+      const el = document.getElementById("userInput");
+      if (!el) return;
+      const txt = String(waveLagMs);
+      if (el.value !== txt) el.value = txt;
+    }
+
+    function setWaveLagMs(ms, opts) {
+      opts = opts || {};
+      if (!lastWaveData) return;
+
+      const num = Number(ms);
+      const next = clampNum(
+        Math.round(isFinite(num) ? num : 0),
+        -WAVE_LAG_LIMIT,
+        WAVE_LAG_LIMIT
+      );
+
+      waveLagMs = next;
+      waveLagEdited = true;
+
+      // 只改这一处，renderWave / 顶部 Δt 标注都读 data.lag_seconds
+      lastWaveData.lag_seconds = next / 1000;
+      lastWaveData.lag_source = "manual";
+
+      if (opts.syncInput !== false) updateWaveLagInput();
+
+      refreshWaveLagView();
+      renderWave();
+
+      // 每次改都回写表单：否则提示说「已同步」而表单还是旧值
+      syncManualDelayInput();
+      updateWaveMetaText();
+    }
+
+    function nudgeWaveLag(delta) {
+      if (!lastWaveData) return;
+      setWaveLagMs(waveLagMs + delta);
+    }
+
+    /* 刻度步长取 1 / 2 / 5 × 10^n，放大后不会挤成一团 */
+    function niceStep(span, ticks) {
+      const raw = span / Math.max(1, ticks);
+      if (!(raw > 0) || !isFinite(raw)) return 1;
+      const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      const norm = raw / mag;
+      const mult = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+      return mult * mag;
+    }
+
+    function formatTick(t, step) {
+      if (step < 0.1) return Math.round(t * 1000) + "ms";
+      if (step < 1) return t.toFixed(1) + "s";
+      return Math.round(t) + "s";
+    }
+
+    function drawWaveforms(data) {
+      if (!waveCanvas) return;
+      lastWaveData = data;
+
+      const lag = Number(data.lag_seconds) || 0;
+      const vDur = Number(data.video && data.video.duration) || 0;
+      const mDur = Number(data.music && data.music.duration) || 0;
+
+      // 数据完整范围 = 视频从 0 起、音乐从 lag 起，两段取并集
+      waveView.full0 = Math.min(0, lag);
+      waveView.full1 = Math.max(vDur, lag + mDur, 0.001);
+      waveView.t0 = waveView.full0;
+      waveView.t1 = waveView.full1;
+      updateWaveScale();
+
+      renderWave();
+
+      // 文案跟视窗无关，只跟数据有关
+      waveLagMs = Math.round(lag * 1000);
+      waveLagEdited = false;
+      setWaveLagControls(true);
+      updateWaveLagInput();
+      updateWaveMetaText();
+    }
+
+    function renderWave() {
+      if (!waveCanvas || !lastWaveData) return;
+      const data = lastWaveData;
+
+      const wrap = waveCanvas.parentElement;
+      const cssW = Math.max(260, (wrap ? wrap.clientWidth : 320) - 12);
+      const cssH = cssW < 520 ? 260 : 330;
+      const dpr = window.devicePixelRatio || 1;
+
+      // 只在尺寸真的变了才重设缓冲区：拖动时每帧重设会很卡
+      if (
+        waveCanvas.width !== Math.round(cssW * dpr) ||
+        waveCanvas.height !== Math.round(cssH * dpr)
+      ) {
+        waveCanvas.width = Math.round(cssW * dpr);
+        waveCanvas.height = Math.round(cssH * dpr);
+        waveCanvas.style.width = cssW + "px";
+        waveCanvas.style.height = cssH + "px";
+      }
+
+      const ctx = waveCanvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssW, cssH);
+
+      const pad = { l: 44, r: 14, t: 40, b: 26 };
+      const plotW = cssW - pad.l - pad.r;
+      const plotH = cssH - pad.t - pad.b;
+      waveView.geom = { padL: pad.l, padT: pad.t, plotW: plotW, plotH: plotH };
+
+      const X = (t) => pad.l + ((t - waveView.t0) / waveSpan()) * plotW;
+
+      const lag = Number(data.lag_seconds) || 0;
+      const vDur = Number(data.video && data.video.duration) || 0;
+      const mDur = Number(data.music && data.music.duration) || 0;
+      const vPts = (data.video && data.video.points) || [];
+      const mPts = (data.music && data.music.points) || [];
+
+      const laneH = plotH / 2;
+      const vCenter = pad.t + laneH * 0.5;
+      const mCenter = pad.t + laneH * 1.5;
+      const half = laneH * 0.4;
+
+      // ---- 时间网格 + 底部刻度 ----
+      const step = niceStep(waveSpan(), Math.max(4, Math.round(plotW / 110)));
+      ctx.lineWidth = 1;
+      ctx.font = "11px system-ui, -apple-system, sans-serif";
+
+      const kFrom = Math.ceil(waveView.t0 / step - 1e-9);
+      const kTo = Math.floor(waveView.t1 / step + 1e-9);
+      for (let k = kFrom; k <= kTo; k++) {
+        const t = k * step;
+        const x = Math.round(X(t)) + 0.5;
+
+        ctx.strokeStyle = "rgba(255,255,255,0.07)";
+        ctx.beginPath();
+        ctx.moveTo(x, pad.t);
+        ctx.lineTo(x, pad.t + plotH);
+        ctx.stroke();
+
+        ctx.fillStyle = "rgba(159,170,214,0.85)";
+        ctx.textAlign = "center";
+        if (x < pad.l + 26) ctx.textAlign = "left";
+        else if (x > pad.l + plotW - 26) ctx.textAlign = "right";
+        ctx.fillText(formatTick(t, step), x, cssH - 9);
+      }
+
+      // ---- 两条车道之间的分隔线 ----
+      ctx.strokeStyle = "rgba(255,255,255,0.1)";
+      ctx.beginPath();
+      ctx.moveTo(pad.l, pad.t + laneH);
+      ctx.lineTo(pad.l + plotW, pad.t + laneH);
+      ctx.stroke();
+
+      // ---- 波形主体（上下对称填充） ----
+      const drawLane = (pts, dur, startT, centerY, stroke, fill) => {
+        const n = pts.length;
+        if (!n || dur <= 0) return;
+        const stepT = dur / n;
+
+        // 只连视野内的点：放大后若把画布外几万个像素的点也连进来会明显卡顿
+        let i0 = Math.floor((waveView.t0 - startT) / stepT) - 1;
+        let i1 = Math.ceil((waveView.t1 - startT) / stepT) + 1;
+        i0 = Math.max(0, i0);
+        i1 = Math.min(n - 1, i1);
+        if (i1 < 0 || i0 > n - 1 || i1 < i0) return;
+
+        ctx.beginPath();
+        for (let i = i0; i <= i1; i++) {
+          const x = X(startT + i * stepT);
+          const y = centerY - pts[i] * half;
+          if (i === i0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        for (let i = i1; i >= i0; i--) {
+          ctx.lineTo(X(startT + i * stepT), centerY + pts[i] * half);
+        }
+        ctx.closePath();
+
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      };
+
+      // 波形和起点虚线都裁在绘图区内，放大后不会溢出盖到左侧刻度上
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(pad.l, pad.t, plotW, plotH);
+      ctx.clip();
+
+      drawLane(vPts, vDur, 0, vCenter, "#55dbff", "rgba(85,219,255,0.26)");
+      drawLane(mPts, mDur, lag, mCenter, "#ff7ad9", "rgba(255,122,217,0.22)");
+
+      const xV = X(0);
+      const xM = X(lag);
+
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(85,219,255,0.5)";
+      ctx.beginPath();
+      ctx.moveTo(xV, pad.t);
+      ctx.lineTo(xV, pad.t + plotH);
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(255,122,217,0.5)";
+      ctx.beginPath();
+      ctx.moveTo(xM, pad.t);
+      ctx.lineTo(xM, pad.t + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.restore();
+
+      // ---- 顶部延迟标注 ----
+      const inView = (x) => x >= pad.l - 1 && x <= pad.l + plotW + 1;
+      // 两个起点都在视野外，标了也看不见，直接收工
+      if (!inView(xV) && !inView(xM)) return;
+
+      const yMark = 22;
+      const lagMs = Math.round(lag * 1000);
+      const label = "Δt = " + (lagMs > 0 ? "+" : "") + lagMs + " ms";
+
+      ctx.font = "600 12px system-ui, -apple-system, sans-serif";
+
+      if (Math.abs(lag) < 0.0005) {
+        ctx.fillStyle = "#c9b8ff";
+        ctx.textAlign = "left";
+        ctx.fillText(label + "（已对齐）", xV + 8, yMark + 4);
+        return;
+      }
+
+      const dir = xM >= xV ? 1 : -1;
+
+      ctx.strokeStyle = "rgba(124,92,255,0.95)";
+      ctx.fillStyle = "rgba(124,92,255,0.95)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(xV, yMark);
+      ctx.lineTo(xM, yMark);
+      ctx.stroke();
+
+      [xV, xM].forEach((x) => {
+        if (!inView(x)) return;
+        ctx.beginPath();
+        ctx.moveTo(x, yMark - 4);
+        ctx.lineTo(x, yMark + 4);
+        ctx.stroke();
+      });
+
+      ctx.beginPath();
+      ctx.moveTo(xM, yMark);
+      ctx.lineTo(xM - dir * 7, yMark - 4);
+      ctx.lineTo(xM - dir * 7, yMark + 4);
+      ctx.closePath();
+      ctx.fill();
+
+      // 两个竖线离得近时文字改放外侧，避免压在箭头上
+      ctx.fillStyle = "#c9b8ff";
+      const textW = ctx.measureText(label).width;
+      const tight = Math.abs(xM - xV) < textW + 14;
+      let tx;
+      if (tight) {
+        tx = clampNum(Math.max(xV, xM) + 10, pad.l + 4, pad.l + plotW - 4);
+        ctx.textAlign = "left";
+        if (tx + textW > pad.l + plotW - 4) {
+          tx = clampNum(Math.min(xV, xM) - 10, pad.l + 4, pad.l + plotW - 4);
+          ctx.textAlign = "right";
+        }
+      } else {
+        tx = clampNum((xV + xM) / 2, pad.l + textW / 2 + 4, pad.l + plotW - textW / 2 - 4);
+        ctx.textAlign = "center";
+      }
+      ctx.fillText(label, tx, tight ? yMark + 4 : yMark - 6);
+    }
+
+    /* ---------- 缩放 / 平移手势 ---------- */
+    const wavePointers = new Map();   // pointerId -> {x, y}
+    let wavePinch = null;
+
+    function wavePinchState() {
+      const pts = [];
+      wavePointers.forEach((p) => pts.push(p));
+      if (pts.length < 2) return null;
+      const a = pts[0];
+      const b = pts[1];
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return { dist: Math.sqrt(dx * dx + dy * dy), midX: (a.x + b.x) / 2 };
+    }
+
+    /* 屏幕横坐标 -> 绘图区内的相对位置（0~1） */
+    function waveAnchorFrac(clientX) {
+      const g = waveView.geom;
+      if (!g || !waveCanvas) return 0.5;
+      const rect = waveCanvas.getBoundingClientRect();
+      if (!rect.width) return 0.5;
+      return (clientX - rect.left - g.padL) / g.plotW;
+    }
+
+    if (waveCanvas) {
+      // 滚轮 / 触控板：向上滚放大，以指针所在位置为锚点
+      waveCanvas.addEventListener(
+        "wheel",
+        (e) => {
+          if (!lastWaveData || !waveView.geom) return;
+          e.preventDefault();
+          zoomWave(Math.exp(-e.deltaY * 0.0016), waveAnchorFrac(e.clientX));
+        },
+        { passive: false }
+      );
+
+      waveCanvas.addEventListener("pointerdown", (e) => {
+        if (!lastWaveData) return;
+        wavePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        try {
+          waveCanvas.setPointerCapture(e.pointerId);
+        } catch (err) {
+          /* 个别老 WebView 不支持捕获，忽略即可 */
+        }
+        waveCanvas.classList.add("dragging");
+        if (wavePointers.size === 2) wavePinch = wavePinchState();
+      });
+
+      waveCanvas.addEventListener("pointermove", (e) => {
+        const p = wavePointers.get(e.pointerId);
+        if (!p) return;
+
+        const dx = e.clientX - p.x;
+        p.x = e.clientX;
+        p.y = e.clientY;
+
+        const g = waveView.geom;
+        if (!g) return;
+
+        if (wavePointers.size >= 2) {
+          const st = wavePinchState();
+          if (wavePinch && st) {
+            // 两指间距变化 -> 缩放；中点位移 -> 平移
+            if (wavePinch.dist > 4 && st.dist > 4) {
+              zoomWave(st.dist / wavePinch.dist, waveAnchorFrac(st.midX));
+            }
+            const dMid = st.midX - wavePinch.midX;
+            if (Math.abs(dMid) > 0.5) panWaveBy(-(dMid / g.plotW) * waveSpan());
+          }
+          wavePinch = st;
+          return;
+        }
+
+        if (Math.abs(dx) > 0.01) panWaveBy(-(dx / g.plotW) * waveSpan());
+      });
+
+      const endWavePointer = (e) => {
+        wavePointers.delete(e.pointerId);
+        if (wavePointers.size < 2) wavePinch = null;
+        if (!wavePointers.size) waveCanvas.classList.remove("dragging");
+      };
+      ["pointerup", "pointercancel", "lostpointercapture"].forEach((name) => {
+        waveCanvas.addEventListener(name, endWavePointer);
+      });
+
+      // 双击复位到全览
+      waveCanvas.addEventListener("dblclick", (e) => {
+        if (!lastWaveData) return;
+        e.preventDefault();
+        resetWaveView();
+      });
+    }
+
+    /* 原来的 ± 是缩放，现在改成延迟加减：一次 100ms */
+    if (waveLagMinus) {
+      waveLagMinus.addEventListener("click", () => nudgeWaveLag(-WAVE_LAG_STEP));
+    }
+    if (waveLagPlus) {
+      waveLagPlus.addEventListener("click", () => nudgeWaveLag(WAVE_LAG_STEP));
+    }
+
+    if (waveLagInput) {
+      // 边打边画：只认整数（可带正负号），不合法就先不动，等失焦再说
+      waveLagInput.addEventListener("input", () => {
+        const raw = waveLagInput.value.trim();
+        if (!/^[+-]?\d+$/.test(raw)) return;
+        setWaveLagMs(parseInt(raw, 10), { syncInput: false });
+      });
+
+      const commitWaveLagInput = () => {
+        if (!lastWaveData) {
+          updateWaveLagInput();
+          return;
+        }
+        const raw = waveLagInput.value.trim();
+        if (/^[+-]?\d+$/.test(raw)) {
+          setWaveLagMs(parseInt(raw, 10));
+        } else if (raw) {
+          showToast("延迟请填整数毫秒，例如 -300 或 450");
+        } else {
+          showToast("延迟不能为空");
+        }
+        updateWaveLagInput();
+      };
+
+      waveLagInput.addEventListener("change", commitWaveLagInput);
+      waveLagInput.addEventListener("blur", commitWaveLagInput);
+      waveLagInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          waveLagInput.blur();
+        }
+      });
+    }
+
+    if (waveZoomReset) {
+      waveZoomReset.addEventListener("click", () => {
+        if (lastWaveData) resetWaveView();
+      });
+    }
+
+    const hideWaveModal = () => {
+      if (waveMask) waveMask.classList.remove("show");
+    };
+
+    if (waveBtn) {
+      waveBtn.addEventListener("click", async () => {
+        if (waveBusy) {
+          showToast("正在分析，请稍候");
+          return;
+        }
+
+        const vEl = document.getElementById("videoFile");
+        const aEl = document.getElementById("audioFile");
+        if (!vEl || !vEl.files || !vEl.files.length) {
+          showToast("请先上传视频文件");
+          return;
+        }
+        if (!aEl || !aEl.files || !aEl.files.length) {
+          showToast("请先上传参考音乐");
+          return;
+        }
+
+        const manualEl = document.getElementById("userInput");
+        const manual = manualEl && typeof manualEl.value === "string" ? manualEl.value : "";
+
+        waveBusy = true;
+        waveBtn.disabled = true;
+        const originalText = waveBtn.textContent;
+        waveBtn.textContent = "分析中…";
+
+        if (waveMask) waveMask.classList.add("show");
+        setWaveLagControls(false);
+        if (waveNote) waveNote.style.display = "none";
+        if (waveMeta) waveMeta.textContent = "正在抽取音轨…";
+        if (waveHint) {
+          waveHint.style.display = "block";
+          waveHint.textContent = manual.trim()
+            ? "正在按手填延迟生成波形…"
+            : "正在自动对齐，可能需要几十秒…";
+        }
+
+        try {
+          const data = await requestWaveform(manual.trim());
+          if (waveHint) waveHint.style.display = "none";
+          drawWaveforms(data);
+        } catch (err) {
+          console.error(err);
+          if (waveMeta) waveMeta.textContent = "—";
+          if (waveHint) {
+            waveHint.style.display = "block";
+            waveHint.textContent = err.message || "分析失败";
+          }
+          // 失败时画布上还留着上一次的波形，延迟控件跟着恢复
+          setWaveLagControls(!!lastWaveData);
+          if (lastWaveData) {
+            updateWaveLagInput();
+            updateWaveMetaText();
+          }
+          showToast(err.message || "分析失败");
+        } finally {
+          waveBusy = false;
+          waveBtn.disabled = false;
+          waveBtn.textContent = originalText;
+        }
+      });
+    }
+
+    if (waveClose) waveClose.addEventListener("click", hideWaveModal);
+
+    if (waveMask) {
+      waveMask.addEventListener("click", (e) => {
+        if (e.target === waveMask) hideWaveModal();
+      });
+    }
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && waveMask && waveMask.classList.contains("show")) {
+        hideWaveModal();
+      }
+    });
+
+    // 横竖屏切换会让 cssW 变，画布尺寸是按像素算死的，必须重绘
+    window.addEventListener("resize", () => {
+      if (lastWaveData && waveMask && waveMask.classList.contains("show")) {
+        // 只重画，不重置视窗 —— 横竖屏切换后缩放位置要保住
+        renderWave();
+      }
+    });
 
     /* =========================
        海报挂图物理拖拽

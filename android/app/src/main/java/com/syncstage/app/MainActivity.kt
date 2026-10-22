@@ -44,6 +44,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -108,6 +109,13 @@ class MainActivity : AppCompatActivity() {
 
     // 内核同一时刻只能跑一个任务：第二个请求排队，避免两路 ffmpeg 抢内存
     private val taskMutex = Mutex()
+
+    /**
+     * 波形分析的重入保护。
+     * 它也会调 FFmpeg（抽两条音轨），自动对齐还能跑几十秒，
+     * 和正式任务并行会直接抢内存，所以互斥而不是排队 —— 重复点击给提示就好。
+     */
+    private val analyzing = AtomicBoolean(false)
 
     private data class TaskSnapshot(
         val state: String,
@@ -204,6 +212,15 @@ class MainActivity : AppCompatActivity() {
             domStorageEnabled = true          // 页面用 localStorage 记后端地址
             mediaPlaybackRequiresUserGesture = false
             textZoom = 100                    // 系统字体放大不该破坏布局
+
+            // 禁止整页缩放：捏合、双击放大全部失效。
+            // 页面里自己的缩放（延迟波形 canvas、海报拖拽）走 PointerEvent，不受影响。
+            // 注意 WebSettings 的 getter 是老命名的 supportZoom()，没有 get 前缀，
+            // Kotlin 不会生成同名属性，所以这里必须显式调 setter。
+            setSupportZoom(false)
+            setBuiltInZoomControls(false)     // 别出现那对 +/− 浮动按钮
+            setDisplayZoomControls(false)
+
             cacheMode = WebSettings.LOAD_NO_CACHE
 
             // 页面从 file:///android_asset 加载（不依赖 Python 服务，秒开）。
@@ -544,6 +561,72 @@ class MainActivity : AppCompatActivity() {
             }
             return json.toString()
         }
+
+        /**
+         * 请求一次「延迟波形分析」。
+         *
+         * payload: {"manualDelay": "..."} —— 和提交任务共用同一个字段名，
+         * 页面里不用维护两套参数名。
+         *
+         * 采用「立即返回 + 完成后回调」的方式，不做轮询：
+         * 自动对齐要几十秒，JS 侧用一个 Promise 等 window.__syncStageWaveform。
+         */
+        @JavascriptInterface
+        fun analyzeWaveform(payload: String) {
+            val options = runCatching { JSONObject(payload) }.getOrDefault(JSONObject())
+            val manualLagMs = options.optString("manualDelay").trim()
+
+            lifecycleScope.launch {
+                val json = runWaveformAnalysis(manualLagMs)
+                // 回调必须回主线程；结果里可能有引号/换行，必须 quote 转义，
+                // 否则拼出来的 JS 会语法错误，页面那边就是"点了没反应"
+                webView.post {
+                    webView.evaluateJavascript(
+                        "window.__syncStageWaveform && window.__syncStageWaveform(" +
+                            JSONObject.quote(json) + ");",
+                        null,
+                    )
+                }
+            }
+        }
+
+        private suspend fun runWaveformAnalysis(manualLagMs: String): String {
+            if (!analyzing.compareAndSet(false, true)) {
+                return errorJson("正在分析中，请等上一次分析结束")
+            }
+            return try {
+                if (!engineReady.isCompleted) {
+                    return errorJson("处理内核还在启动，请等几秒后重试")
+                }
+                engineReady.await()
+
+                // 文件可能还在复制，await() 会等它完成
+                val video = videoSource?.await()
+                    ?: return errorJson("请先选择手元视频")
+                val music = musicSource?.await()
+                    ?: return errorJson("请先选择参考音乐")
+                if (video.isBlank()) return errorJson("视频读取失败，请重新选择")
+                if (music.isBlank()) return errorJson("音乐读取失败，请重新选择")
+
+                PythonEngine.analyzeWaveform(
+                    context = this@MainActivity,
+                    videoPath = video,
+                    musicPath = music,
+                    manualLagMs = manualLagMs,
+                    workDir = File(cacheDir, "analysis").absolutePath,
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "波形分析失败", e)
+                errorJson(e.message ?: "分析失败")
+            } finally {
+                analyzing.set(false)
+            }
+        }
+
+        private fun errorJson(message: String): String = JSONObject()
+            .put("status", "error")
+            .put("error", message)
+            .toString()
     }
 
     private fun updateTask(taskId: String, state: String, progress: Double, detail: String) {

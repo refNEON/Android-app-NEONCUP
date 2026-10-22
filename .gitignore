@@ -136,3 +136,6 @@ android/app/src/main/python/mobile_api.py
 
 # 离线轮子缓存（~20MB/个，太大不进仓库；缺了会自动回退到联网下载）
 android/wheels/
+
+.workbuddy
+.MAINTENANCE.txt

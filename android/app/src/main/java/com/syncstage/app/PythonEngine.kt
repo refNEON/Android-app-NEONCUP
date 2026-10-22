@@ -125,6 +125,40 @@ object PythonEngine {
     }
 
     /**
+     * 波形分析：抽两条音轨 → 各压成若干峰值 → 带上延迟量返回。
+     *
+     * [manualLagMs] 有值就直接用（毫秒，正延后/负提前），
+     * 空串则跑一次完整的自动对齐 —— 那条路慢，和正式处理的对齐阶段相当。
+     *
+     * 一定返回 JSON 字符串，出错也走 JSON（status=error），
+     * 这样调用方不用区分异常和正常结果。
+     */
+    suspend fun analyzeWaveform(
+        context: Context,
+        videoPath: String,
+        musicPath: String,
+        manualLagMs: String = "",
+        workDir: String,
+        points: Int = 720,
+    ): String = withContext(Dispatchers.Default) {
+        ensureStarted(context)
+
+        val raw = module(context).callAttr(
+            "analyze_waveform",
+            videoPath,
+            musicPath,
+            manualLagMs,
+            workDir,
+            points,
+        ).toString()
+
+        runCatching { JSONObject(raw).toString() }.getOrNull() ?: JSONObject()
+            .put("status", "error")
+            .put("error", "Python 返回了非 JSON 内容：$raw")
+            .toString()
+    }
+
+    /**
      * Python 侧的 progress_callback 会调用它的 onProgress(data)。
      *
      * ⚠️ 必须实现这个「函数式接口」（只有一个抽象方法的接口）。
