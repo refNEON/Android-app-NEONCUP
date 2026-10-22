@@ -75,7 +75,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.syncstage.app"
+        applicationId = "com.NEONCUP.app"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
